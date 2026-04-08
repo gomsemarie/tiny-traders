@@ -7,7 +7,7 @@ import { initDatabase } from './db';
 import { initPriceSimulator } from './services/trading/price-simulator';
 import { initEventScheduler } from './services/event/event-service';
 
-const PORT = Number(process.env.PORT) || 4000;
+const PORT = Number(process.env.PORT) || 4100;
 const HOST = process.env.HOST || '0.0.0.0';
 
 async function main() {
@@ -23,7 +23,7 @@ async function main() {
 
   // CORS
   await fastify.register(cors, {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true,
   });
 
@@ -40,7 +40,7 @@ async function main() {
   // Socket.io
   const io = new SocketServer(fastify.server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
       credentials: true,
     },
   });

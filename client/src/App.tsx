@@ -16,9 +16,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#f9fafb',
+        background: '#f7f8fa',
         color: '#9ca3af',
-        fontFamily: "'Inter', system-ui, sans-serif",
         fontSize: 13,
       }}>
         로딩 중...

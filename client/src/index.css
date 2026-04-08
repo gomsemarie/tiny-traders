@@ -1,5 +1,40 @@
 @import "tailwindcss";
 
+:root {
+  /* ── Backgrounds ── */
+  --bg-deep: #f7f8fa;
+  --bg-panel: #ffffff;
+  --bg-panel-hover: #f1f3f6;
+  --bg-surface: #ffffff;
+  --bg-surface-alt: #f7f8fa;
+  --bg-desktop: #f1f3f6;
+
+  /* ── Borders ── */
+  --border-wood: #e2e5ea;
+  --border-wood-light: #cdd1d8;
+  --border-gold: #3b82f6;
+  --border-gold-dim: #93c5fd;
+
+  /* ── Accents ── */
+  --gold: #3b82f6;
+  --gold-bright: #2563eb;
+  --gold-dim: #93c5fd;
+  --emerald: #10b981;
+  --ruby: #ef4444;
+  --sapphire: #6366f1;
+
+  /* ── Text ── */
+  --text-cream: #1e2028;
+  --text-cream-muted: #6b7280;
+  --text-dark: #1e2028;
+  --text-dark-muted: #6b7280;
+  --text-gold: #3b82f6;
+
+  /* ── Fonts ── */
+  --font-display: 'Gothic A1', sans-serif;
+  --font-body: 'Gothic A1', sans-serif;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -7,14 +42,14 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #f9fafb;
-  color: #111827;
+  background: var(--bg-deep);
+  color: var(--text-cream);
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -23,9 +58,40 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--border-wood-light);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.25); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

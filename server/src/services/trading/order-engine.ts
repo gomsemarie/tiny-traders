@@ -91,6 +91,14 @@ export async function placeOrder(
     status: 'pending',
   });
 
+  // Market orders should be executed immediately
+  if (params.type === 'market') {
+    const result = await executeMarketOrder(db, orderId);
+    if (!result.success) {
+      return { orderId, error: result.error };
+    }
+  }
+
   return { orderId };
 }
 

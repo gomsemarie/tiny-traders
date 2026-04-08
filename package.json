@@ -4,6 +4,7 @@
   "private": true,
   "description": "도트 2D 시뮬레이션 (다마고치 + 모의투자 + 타이쿤)",
   "scripts": {
+    "predev": "kill $(lsof -ti:5173,4100) 2>/dev/null; true",
     "dev": "pnpm --parallel dev",
     "dev:client": "pnpm --filter client dev",
     "dev:server": "pnpm --filter server dev",

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo, memo, type ReactNode } from 'react';
+import { useCallback, useRef, memo, type ReactNode } from 'react';
 import { Rnd } from 'react-rnd';
 import type { Position } from 'react-rnd';
 
@@ -101,6 +101,8 @@ function WindowFrameInner({
   /* ── render ── */
   if (screenMode === 'hidden') return null;
 
+  const iconColor = isFocused ? '#6b7280' : '#9ca3af';
+
   return (
     <Rnd
       ref={rndRef}
@@ -119,17 +121,17 @@ function WindowFrameInner({
         zIndex: isFocused ? 2 : 1,
         display: 'flex',
         flexDirection: 'column',
-        background: '#fff',
+        background: '#ffffff',
         borderRadius: screenMode === 'maximized' ? 0 : 8,
-        border: `1px solid ${isFocused ? '#9ca3af' : '#d1d5db'}`,
+        border: `1px solid ${isFocused ? '#cdd1d8' : '#e2e5ea'}`,
         boxShadow: isFocused
-          ? '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)'
-          : '0 2px 12px rgba(0,0,0,0.06)',
+          ? '0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)'
+          : '0 2px 12px rgba(0,0,0,0.04)',
         overflow: 'hidden',
-        filter: isFocused ? 'none' : 'brightness(0.97)',
+        filter: isFocused ? 'none' : 'brightness(0.98)',
       }}
     >
-      {/* ── Title bar ── */}
+      {/* ── Title bar — clean light ── */}
       <div
         className={DRAG_HANDLE_CLASS}
         onDoubleClick={toggleMaximize}
@@ -137,44 +139,53 @@ function WindowFrameInner({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          height: 32,
-          padding: '0 8px 0 12px',
-          background: isFocused ? '#f3f4f6' : '#fafafa',
-          borderBottom: '1px solid #e5e7eb',
+          height: 36,
+          padding: '0 8px 0 14px',
+          background: isFocused ? '#ffffff' : '#fafbfc',
+          borderBottom: `1px solid ${isFocused ? '#e2e5ea' : '#eef0f2'}`,
           cursor: screenMode === 'maximized' ? 'default' : 'move',
           flexShrink: 0,
           userSelect: 'none',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: isFocused ? '#1e2028' : '#9ca3af',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
           {title}
         </span>
-        <div style={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
           <WinBtn onClick={toggleMinimize} title="최소화">
-            <svg width="10" height="10" viewBox="0 0 10 10"><rect y="8" width="10" height="1.5" rx="0.5" fill="#6b7280" /></svg>
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <rect y="8" width="10" height="1.5" rx="0.5" fill={iconColor} />
+            </svg>
           </WinBtn>
           <WinBtn onClick={toggleMaximize} title={screenMode === 'maximized' ? '복원' : '최대화'}>
             {screenMode === 'maximized' ? (
               <svg width="10" height="10" viewBox="0 0 10 10">
-                <rect x="2" y="0" width="8" height="8" rx="1" fill="none" stroke="#6b7280" strokeWidth="1.3" />
-                <rect x="0" y="2" width="8" height="8" rx="1" fill="#f9fafb" stroke="#6b7280" strokeWidth="1.3" />
+                <rect x="2" y="0" width="8" height="8" rx="1" fill="none" stroke={iconColor} strokeWidth="1.3" />
+                <rect x="0" y="2" width="8" height="8" rx="1" fill="#ffffff" stroke={iconColor} strokeWidth="1.3" />
               </svg>
             ) : (
               <svg width="10" height="10" viewBox="0 0 10 10">
-                <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke="#6b7280" strokeWidth="1.3" />
+                <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke={iconColor} strokeWidth="1.3" />
               </svg>
             )}
           </WinBtn>
-          <WinBtn onClick={handleClose} title="닫기" hoverBg="#fee2e2">
+          <WinBtn onClick={handleClose} title="닫기" variant="close">
             <svg width="10" height="10" viewBox="0 0 10 10">
-              <path d="M1 1L9 9M9 1L1 9" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M1 1L9 9M9 1L1 9" stroke={iconColor} strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </WinBtn>
         </div>
       </div>
 
       {/* ── Content ── */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, background: '#fff' }}>
         {children}
       </div>
     </Rnd>
@@ -194,17 +205,21 @@ export default memo(WindowFrameInner, (prev, next) => {
 });
 
 /* ── Tiny button ── */
-function WinBtn({ onClick, title, hoverBg, children }: {
-  onClick: () => void; title: string; hoverBg?: string; children: ReactNode;
+function WinBtn({ onClick, title, variant, children }: {
+  onClick: () => void; title: string; variant?: 'close'; children: ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
-      onMouseEnter={(e) => { if (hoverBg) e.currentTarget.style.background = hoverBg; }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = variant === 'close'
+          ? 'rgba(239, 68, 68, 0.1)'
+          : 'rgba(0, 0, 0, 0.05)';
+      }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
       style={{
-        width: 24, height: 24,
+        width: 26, height: 26,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         border: 'none', background: 'transparent', borderRadius: 4, cursor: 'pointer',
       }}

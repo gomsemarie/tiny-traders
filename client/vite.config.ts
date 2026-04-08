@@ -16,11 +16,12 @@ export default defineConfig({
     include: ['lightweight-charts', 'fancy-canvas'],
   },
   server: {
-    port: 3000,
+    port: 5173,
+    strictPort: true,
     proxy: {
-      '/api': 'http://localhost:4000',
+      '/api': 'http://localhost:4100',
       '/socket.io': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:4100',
         ws: true,
       },
     },

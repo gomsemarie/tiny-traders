@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, memo, useEffect, useRef } from 'react';
+import { Icon } from '@iconify/react';
 import { useAuthStore } from '../../stores/auth-store';
 
 // ===============================================
@@ -78,10 +79,10 @@ const RARITY_BG: Record<ShopItem['rarity'], string> = {
 // Category definitions
 // ===============================================
 const CATEGORIES: { key: Category; label: string; icon: string }[] = [
-  { key: 'consumable', label: '소모품', icon: '🧪' },
-  { key: 'tool', label: '도구', icon: '🔧' },
-  { key: 'identity', label: '정체성', icon: '🎭' },
-  { key: 'special', label: '특별', icon: '✨' },
+  { key: 'consumable', label: '소모품', icon: 'tabler:flask' },
+  { key: 'tool', label: '도구', icon: 'tabler:tool' },
+  { key: 'identity', label: '정체성', icon: 'tabler:masks-theater' },
+  { key: 'special', label: '특별', icon: 'tabler:sparkles' },
 ];
 
 // ===============================================
@@ -96,7 +97,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 500,
     category: 'consumable',
     rarity: 'common',
-    icon: '🛡️',
+    icon: 'tabler:shield',
     stock: -1,
     effect: '매도 시 손실 10% 감면',
   },
@@ -107,7 +108,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 1500,
     category: 'consumable',
     rarity: 'rare',
-    icon: '🛡️',
+    icon: 'tabler:shield',
     stock: -1,
     effect: '매도 시 손실 30% 감면',
   },
@@ -118,7 +119,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 800,
     category: 'consumable',
     rarity: 'common',
-    icon: '📿',
+    icon: 'tabler:rosette',
     stock: -1,
     effect: '30분간 돌발 행동 억제',
   },
@@ -129,7 +130,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 1000,
     category: 'consumable',
     rarity: 'rare',
-    icon: '⚡',
+    icon: 'tabler:bolt',
     stock: -1,
     effect: '30분간 랜덤 스텟 +2',
   },
@@ -140,7 +141,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 600,
     category: 'consumable',
     rarity: 'common',
-    icon: '💰',
+    icon: 'tabler:moneybag',
     stock: -1,
     effect: '다음 알바 수익 2배',
   },
@@ -151,7 +152,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 2000,
     category: 'consumable',
     rarity: 'epic',
-    icon: '📰',
+    icon: 'tabler:news',
     stock: -1,
     effect: '1시간 주가 변동 힌트',
   },
@@ -162,7 +163,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 400,
     category: 'consumable',
     rarity: 'common',
-    icon: '💊',
+    icon: 'tabler:pill',
     stock: -1,
     effect: '컨디션 즉시 50% 회복',
   },
@@ -173,7 +174,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 300,
     category: 'consumable',
     rarity: 'common',
-    icon: '🎲',
+    icon: 'tabler:dice',
     stock: -1,
     effect: '다음 투자에 랜덤 보정',
   },
@@ -186,7 +187,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 3000,
     category: 'tool',
     rarity: 'rare',
-    icon: '🔪',
+    icon: 'tabler:knife',
     stock: 5,
     effect: '요리 알바 효율 +20%',
   },
@@ -197,7 +198,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 3000,
     category: 'tool',
     rarity: 'rare',
-    icon: '⌨️',
+    icon: 'tabler:keyboard',
     stock: 5,
     effect: '타자 알바 효율 +20%',
   },
@@ -208,7 +209,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 5000,
     category: 'tool',
     rarity: 'epic',
-    icon: '🔧',
+    icon: 'tabler:tool',
     stock: 3,
     effect: '제작 품질 +30%',
   },
@@ -221,7 +222,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 2000,
     category: 'identity',
     rarity: 'rare',
-    icon: '🧘',
+    icon: 'tabler:yoga',
     stock: 3,
     effect: '멘탈 +3',
   },
@@ -232,7 +233,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 2500,
     category: 'identity',
     rarity: 'epic',
-    icon: '📚',
+    icon: 'tabler:books',
     stock: 3,
     effect: '꼼꼼함 +5',
   },
@@ -243,7 +244,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 1800,
     category: 'identity',
     rarity: 'rare',
-    icon: '🎰',
+    icon: 'tabler:dice',
     stock: 3,
     effect: '행동력 +4, 운 +2',
   },
@@ -256,7 +257,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 10000,
     category: 'special',
     rarity: 'legendary',
-    icon: '🎫',
+    icon: 'tabler:ticket',
     stock: 1,
     effect: '특별 이벤트 참여권',
   },
@@ -267,7 +268,7 @@ const SHOP_ITEMS: ShopItem[] = [
     price: 8000,
     category: 'special',
     rarity: 'legendary',
-    icon: '⏰',
+    icon: 'tabler:clock-bolt',
     stock: 2,
     effect: '모든 쿨타임 50% 단축',
   },
@@ -354,7 +355,7 @@ function PurchaseEffect({ active, onDone }: { active: boolean; onDone: () => voi
             userSelect: 'none',
           }}
         >
-          🪙
+          <Icon icon="tabler:coin" width={14} />
         </span>
       ))}
     </div>
@@ -393,7 +394,7 @@ const CategoryTab = memo(({
       whiteSpace: 'nowrap',
     }}
   >
-    <span style={{ fontSize: 12 }}>{category.icon}</span>
+    <Icon icon={category.icon} width={12} />
     {category.label}
   </button>
 ));
@@ -448,10 +449,9 @@ const ItemRow = memo(({
         borderRadius: 6,
         border: `2px solid ${rarityColor}`,
         background: RARITY_BG[item.rarity],
-        fontSize: 16,
         flexShrink: 0,
       }}>
-        {item.icon}
+        <Icon icon={item.icon} width={16} />
       </div>
 
       {/* Name + effect */}
@@ -530,7 +530,7 @@ const DetailPanel = memo(({
         padding: 16,
         gap: 8,
       }}>
-        <span style={{ fontSize: 32, opacity: 0.4 }}>🏪</span>
+        <Icon icon="tabler:building-store" width={32} style={{ opacity: 0.4 }} />
         <span>아이템을 선택하세요</span>
       </div>
     );
@@ -563,10 +563,9 @@ const DetailPanel = memo(({
           borderRadius: 8,
           border: `2px solid ${rarityColor}`,
           background: RARITY_BG[item.rarity],
-          fontSize: 24,
           flexShrink: 0,
         }}>
-          {item.icon}
+          <Icon icon={item.icon} width={24} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
@@ -920,7 +919,7 @@ export default function ShopWindow() {
 
     // Show effects
     setPurchaseEffect(true);
-    showToast(`${selectedItem.icon} ${selectedItem.name} x${quantity} 구매 완료!`);
+    showToast(`${selectedItem.name} x${quantity} 구매 완료!`);
 
     // Reset quantity
     setQuantity(1);
@@ -999,7 +998,7 @@ export default function ShopWindow() {
           borderLeft: `1px solid ${COLORS.border}`,
           flexShrink: 0,
         }}>
-          <span style={{ fontSize: 13 }}>💰</span>
+          <Icon icon="tabler:moneybag" width={13} />
           <span style={{
             fontSize: COMPACT.priceFontSize,
             fontWeight: 700,
@@ -1055,7 +1054,7 @@ export default function ShopWindow() {
                 color: COLORS.textSecondary,
                 fontSize: COMPACT.valueFontSize,
               }}>
-                <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.4 }}>📦</div>
+                <div style={{ marginBottom: 8, opacity: 0.4 }}><Icon icon="tabler:package" width={24} /></div>
                 이 카테고리에 상품이 없습니다.
               </div>
             ) : (
@@ -1103,7 +1102,7 @@ export default function ShopWindow() {
         borderTop: `1px solid ${COLORS.border}`,
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 14 }}>🐱</span>
+        <Icon icon="tabler:cat" width={14} />
         <span style={{
           fontSize: 10,
           color: COLORS.textSecondary,

@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from 'react';
+import { Icon } from '@iconify/react';
 import { useActiveEvent } from '../../api/events';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSocket } from '../../lib/socket';
@@ -7,7 +8,7 @@ import { queryKeys } from '../../api/query-keys';
 /**
  * EventBanner: Displays the current active event at the top of the dashboard
  * - Shows category icon, event name, description, and remaining time countdown
- * - Colors by category
+ * - Colors by category — warm theme
  * - Socket listeners for real-time event updates
  */
 const EventBanner = memo(() => {
@@ -71,14 +72,14 @@ const EventBanner = memo(() => {
 
   if (!event) return null;
 
-  // Color map by type
-  const colorMap: Record<string, { bg: string; text: string; tag: string }> = {
-    investment: { bg: '#eff6ff', text: '#1e40af', tag: '[투자]' },
-    labor: { bg: '#f0fdf4', text: '#166534', tag: '[노동]' },
-    facility: { bg: '#fef3c7', text: '#b45309', tag: '[시설]' },
-    character: { bg: '#f3e8ff', text: '#7e22ce', tag: '[캐릭터]' },
-    economy: { bg: '#fef3c7', text: '#d97706', tag: '[경제]' },
-    special: { bg: '#fdf2f8', text: '#be185d', tag: '[특수]' },
+  // Color map by type — modern light theme
+  const colorMap: Record<string, { bg: string; text: string; icon: string; tag: string }> = {
+    investment: { bg: '#eff6ff', text: '#2563eb', icon: 'tabler:chart-arrows-vertical', tag: '투자' },
+    labor:      { bg: '#ecfdf5', text: '#059669', icon: 'tabler:hammer',                tag: '노동' },
+    facility:   { bg: '#fffbeb', text: '#d97706', icon: 'tabler:building',               tag: '시설' },
+    character:  { bg: '#f5f3ff', text: '#7c3aed', icon: 'tabler:user-star',              tag: '캐릭터' },
+    economy:    { bg: '#fffbeb', text: '#d97706', icon: 'tabler:coins',                  tag: '경제' },
+    special:    { bg: '#fdf2f8', text: '#db2777', icon: 'tabler:sparkles',               tag: '특수' },
   };
 
   const colors = colorMap[event.type] || colorMap.special;
@@ -87,7 +88,7 @@ const EventBanner = memo(() => {
     <div
       style={{
         background: colors.bg,
-        borderBottom: `1px solid ${colors.text}20`,
+        borderBottom: `1px solid ${colors.text}25`,
         padding: '6px 16px',
         fontSize: 12,
         display: 'flex',
@@ -100,46 +101,32 @@ const EventBanner = memo(() => {
         whiteSpace: 'nowrap',
       }}
     >
-      <span
-        style={{
-          color: colors.text,
-          fontWeight: 700,
-          flexShrink: 0,
-        }}
-      >
-        {colors.tag}
+      <span style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        color: colors.text, fontWeight: 700, flexShrink: 0,
+      }}>
+        <Icon icon={colors.icon} width={14} />
+        [{colors.tag}]
       </span>
-      <span
-        style={{
-          color: colors.text,
-          fontWeight: 600,
-          flexShrink: 0,
-        }}
-      >
+      <span style={{
+        color: colors.text, fontWeight: 600, flexShrink: 0,
+      }}>
         {event.name}
       </span>
-      <span
-        style={{
-          color: colors.text,
-          fontWeight: 400,
-          opacity: 0.7,
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
+      <span style={{
+        color: colors.text, fontWeight: 400, opacity: 0.6,
+        flex: 1, minWidth: 0,
+        overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>
         {event.description}
       </span>
       {remainingTime && (
-        <span
-          style={{
-            color: colors.text,
-            fontWeight: 600,
-            flexShrink: 0,
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
+        <span style={{
+          color: colors.text, fontWeight: 600, flexShrink: 0,
+          fontVariantNumeric: 'tabular-nums',
+          display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          <Icon icon="tabler:clock" width={13} />
           {remainingTime}
         </span>
       )}

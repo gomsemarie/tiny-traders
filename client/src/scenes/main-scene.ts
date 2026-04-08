@@ -1,4 +1,11 @@
 import Phaser from 'phaser';
+import {
+  generateAllTextures,
+  PALETTES,
+  darken,
+  tileRand,
+  type CharacterPalette,
+} from './texture-factory';
 
 // ─── Interfaces ───────────────────────────────────────────────
 interface IsoBuilding {
@@ -13,23 +20,23 @@ interface IsoBuilding {
   roofColorDark: number;
   wallLeft: number;
   wallRight: number;
-  detail: string; // 'house' | 'kitchen' | 'bank' | 'warehouse' | 'rest' | 'hospital'
+  detail: string;
 }
 
 interface IsoCharacter {
-  gfx: Phaser.GameObjects.Graphics;
+  sprite: Phaser.GameObjects.Sprite;
+  shadow: Phaser.GameObjects.Sprite;
   gridX: number;
   gridY: number;
   screenX: number;
   screenY: number;
-  color: number;
-  colorDark: number;
-  colorLight: number;
-  skinColor: number;
+  palette: CharacterPalette;
   currentWP: number;
   waypoints: { gx: number; gy: number }[];
   bobOffset: number;
   label: string;
+  isMoving: boolean;
+  emoteSprite: Phaser.GameObjects.Sprite | null;
 }
 
 interface Decoration {
@@ -38,33 +45,24 @@ interface Decoration {
   gridY: number;
 }
 
-// ─── Color helpers ────────────────────────────────────────────
-function darken(c: number, amount: number): number {
-  const r = Math.max(0, ((c >> 16) & 0xff) - amount);
-  const g = Math.max(0, ((c >> 8) & 0xff) - amount);
-  const b = Math.max(0, (c & 0xff) - amount);
-  return (r << 16) | (g << 8) | b;
-}
-
 // ─── Scene ────────────────────────────────────────────────────
 export class MainScene extends Phaser.Scene {
-  // Grid constants
   private readonly TILE_W = 64;
   private readonly TILE_H = 32;
   private readonly GRID_SIZE = 10;
   private centerX = 0;
   private offsetY = 0;
 
-  // State
   private buildings: IsoBuilding[] = [];
   private characters: IsoCharacter[] = [];
   private decorations: Decoration[] = [];
   private currentDay = 1;
 
-  // Layers
-  private groundGfx!: Phaser.GameObjects.Graphics;
+  // Containers for depth sorting
+  private groundContainer!: Phaser.GameObjects.Container;
   private buildingContainer!: Phaser.GameObjects.Container;
   private decoContainer!: Phaser.GameObjects.Container;
+  private charContainer!: Phaser.GameObjects.Container;
   private uiContainer!: Phaser.GameObjects.Container;
   private particleGfx!: Phaser.GameObjects.Graphics;
   private tooltipContainer!: Phaser.GameObjects.Container;
@@ -74,7 +72,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // All procedural - no assets to load
+    // No external assets — all textures generated procedurally
   }
 
   create(): void {
@@ -84,17 +82,21 @@ export class MainScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#fef9f0');
 
-    // Create layered containers for depth
-    this.groundGfx = this.add.graphics().setDepth(0);
+    // Generate all sprite textures
+    generateAllTextures(this);
+
+    // Create depth-ordered containers
+    this.groundContainer = this.add.container(0, 0).setDepth(0);
     this.decoContainer = this.add.container(0, 0).setDepth(1);
     this.buildingContainer = this.add.container(0, 0).setDepth(2);
+    this.charContainer = this.add.container(0, 0).setDepth(3);
     this.particleGfx = this.add.graphics().setDepth(4);
     this.tooltipContainer = this.add.container(0, 0).setDepth(50);
     this.uiContainer = this.add.container(0, 0).setDepth(100);
 
-    this.drawGround();
+    this.placeGroundTiles();
     this.createDecorations();
-    this.drawDecorations();
+    this.placeDecorations();
     this.createBuildings();
     this.drawBuildings();
     this.createCharacters();
@@ -102,6 +104,7 @@ export class MainScene extends Phaser.Scene {
     this.createAmbientParticles(width, height);
     this.setupInput();
     this.animateCharacters();
+    this.startEmoteSystem();
   }
 
   // ─── Coordinate conversion ────────────────────────────────────
@@ -124,56 +127,39 @@ export class MainScene extends Phaser.Scene {
     return (gx + gy) * 10;
   }
 
-  // ─── Ground tiles ─────────────────────────────────────────────
-  private drawGround(): void {
-    const g = this.groundGfx;
-    g.clear();
-
-    // Walkway positions (set for a nice path network)
+  // ─── Ground tiles (sprites) ───────────────────────────────────
+  private placeGroundTiles(): void {
     const walkwaySet = new Set<string>();
-    // Horizontal path at row 4
     for (let x = 0; x < this.GRID_SIZE; x++) walkwaySet.add(`${x},4`);
-    // Vertical path at col 4
     for (let y = 0; y < this.GRID_SIZE; y++) walkwaySet.add(`4,${y}`);
-    // Cross path at row 7
     for (let x = 2; x < 8; x++) walkwaySet.add(`${x},7`);
-    // Extra connector
     for (let y = 4; y < 8; y++) walkwaySet.add(`7,${y}`);
-
-    const grassColors = [0xa8d5a2, 0x8ec986, 0xb8deb2];
-    const walkColors = [0xe8d5b8, 0xdcc9a8];
 
     for (let gx = 0; gx < this.GRID_SIZE; gx++) {
       for (let gy = 0; gy < this.GRID_SIZE; gy++) {
         const { x: sx, y: sy } = this.toScreen(gx, gy);
         const isWalk = walkwaySet.has(`${gx},${gy}`);
-        const colorIdx = (gx * 3 + gy * 7) % (isWalk ? walkColors.length : grassColors.length);
-        const color = isWalk ? walkColors[colorIdx] : grassColors[colorIdx];
 
-        // Draw diamond tile
-        g.fillStyle(color, 1);
-        g.beginPath();
-        g.moveTo(sx, sy);
-        g.lineTo(sx + this.TILE_W / 2, sy + this.TILE_H / 2);
-        g.lineTo(sx, sy + this.TILE_H);
-        g.lineTo(sx - this.TILE_W / 2, sy + this.TILE_H / 2);
-        g.closePath();
-        g.fillPath();
+        // Pick variant based on tile position
+        const rand = tileRand(gx, gy, 0);
+        let textureKey: string;
+        if (isWalk) {
+          const variant = Math.floor(rand * 3);
+          textureKey = `tile-walk-${variant}`;
+        } else {
+          const variant = Math.floor(rand * 4);
+          textureKey = `tile-grass-${variant}`;
+        }
 
-        // Subtle outline
-        g.lineStyle(1, 0x90b88a, 0.15);
-        g.beginPath();
-        g.moveTo(sx, sy);
-        g.lineTo(sx + this.TILE_W / 2, sy + this.TILE_H / 2);
-        g.lineTo(sx, sy + this.TILE_H);
-        g.lineTo(sx - this.TILE_W / 2, sy + this.TILE_H / 2);
-        g.closePath();
-        g.strokePath();
+        // Place tile sprite — texture origin is top-center of diamond
+        const tile = this.add.sprite(sx, sy, textureKey);
+        tile.setOrigin(0.5, 0);
+        this.groundContainer.add(tile);
       }
     }
   }
 
-  // ─── Buildings ────────────────────────────────────────────────
+  // ─── Buildings (Graphics — complex isometric shapes) ──────────
   private createBuildings(): void {
     this.buildings = [
       {
@@ -222,11 +208,9 @@ export class MainScene extends Phaser.Scene {
   }
 
   private drawBuildings(): void {
-    // Sort buildings by depth (back to front)
     const sorted = [...this.buildings].sort(
-      (a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY)
+      (a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY),
     );
-
     for (const b of sorted) {
       const gfx = this.make.graphics({ x: 0, y: 0 }, false);
       this.drawIsoBuilding(gfx, b);
@@ -236,344 +220,411 @@ export class MainScene extends Phaser.Scene {
   }
 
   private drawIsoBuilding(g: Phaser.GameObjects.Graphics, b: IsoBuilding): void {
-    // Compute the 4 base corners of the building footprint in screen space
-    const topLeft = this.toScreen(b.gridX, b.gridY);
-    const topRight = this.toScreen(b.gridX + b.tilesW, b.gridY);
-    const bottomRight = this.toScreen(b.gridX + b.tilesW, b.gridY + b.tilesH);
-    const bottomLeft = this.toScreen(b.gridX, b.gridY + b.tilesH);
-
+    const tl = this.toScreen(b.gridX, b.gridY);
+    const tr = this.toScreen(b.gridX + b.tilesW, b.gridY);
+    const br = this.toScreen(b.gridX + b.tilesW, b.gridY + b.tilesH);
+    const bl = this.toScreen(b.gridX, b.gridY + b.tilesH);
     const wh = b.wallHeight;
 
-    // ─── Shadow beneath building ─────────────────────────────
+    // Shadow
     g.fillStyle(0x000000, 0.08);
     g.beginPath();
-    g.moveTo(topLeft.x, topLeft.y + 4);
-    g.lineTo(topRight.x + 4, topRight.y + 4);
-    g.lineTo(bottomRight.x + 4, bottomRight.y + 6);
-    g.lineTo(bottomLeft.x, bottomLeft.y + 6);
+    g.moveTo(tl.x, tl.y + 4);
+    g.lineTo(tr.x + 4, tr.y + 4);
+    g.lineTo(br.x + 4, br.y + 6);
+    g.lineTo(bl.x, bl.y + 6);
     g.closePath();
     g.fillPath();
 
-    // ─── Left face (parallelogram) ───────────────────────────
+    // Left face
     g.fillStyle(b.wallLeft, 1);
     g.beginPath();
-    g.moveTo(topLeft.x, topLeft.y - wh);         // top-left raised
-    g.lineTo(bottomLeft.x, bottomLeft.y - wh);    // bottom-left raised
-    g.lineTo(bottomLeft.x, bottomLeft.y);          // bottom-left ground
-    g.lineTo(topLeft.x, topLeft.y);                // top-left ground
+    g.moveTo(tl.x, tl.y - wh);
+    g.lineTo(bl.x, bl.y - wh);
+    g.lineTo(bl.x, bl.y);
+    g.lineTo(tl.x, tl.y);
     g.closePath();
     g.fillPath();
-
-    // Left face outline
+    this.drawWallBricks(g, tl, bl, wh, b.wallLeft);
     g.lineStyle(1, darken(b.wallLeft, 40), 0.4);
     g.beginPath();
-    g.moveTo(topLeft.x, topLeft.y - wh);
-    g.lineTo(bottomLeft.x, bottomLeft.y - wh);
-    g.lineTo(bottomLeft.x, bottomLeft.y);
-    g.lineTo(topLeft.x, topLeft.y);
+    g.moveTo(tl.x, tl.y - wh); g.lineTo(bl.x, bl.y - wh);
+    g.lineTo(bl.x, bl.y); g.lineTo(tl.x, tl.y);
     g.closePath();
     g.strokePath();
 
-    // ─── Right face (parallelogram) ──────────────────────────
+    // Right face
     g.fillStyle(b.wallRight, 1);
     g.beginPath();
-    g.moveTo(bottomLeft.x, bottomLeft.y - wh);    // front-left raised
-    g.lineTo(bottomRight.x, bottomRight.y - wh);   // front-right raised
-    g.lineTo(bottomRight.x, bottomRight.y);         // front-right ground
-    g.lineTo(bottomLeft.x, bottomLeft.y);           // front-left ground
+    g.moveTo(bl.x, bl.y - wh);
+    g.lineTo(br.x, br.y - wh);
+    g.lineTo(br.x, br.y);
+    g.lineTo(bl.x, bl.y);
     g.closePath();
     g.fillPath();
-
-    // Right face outline
+    this.drawWallBricks(g, bl, br, wh, b.wallRight);
     g.lineStyle(1, darken(b.wallRight, 40), 0.4);
     g.beginPath();
-    g.moveTo(bottomLeft.x, bottomLeft.y - wh);
-    g.lineTo(bottomRight.x, bottomRight.y - wh);
-    g.lineTo(bottomRight.x, bottomRight.y);
-    g.lineTo(bottomLeft.x, bottomLeft.y);
+    g.moveTo(bl.x, bl.y - wh); g.lineTo(br.x, br.y - wh);
+    g.lineTo(br.x, br.y); g.lineTo(bl.x, bl.y);
     g.closePath();
     g.strokePath();
 
-    // ─── Top face (roof diamond) ─────────────────────────────
+    // Roof
     g.fillStyle(b.roofColor, 1);
     g.beginPath();
-    g.moveTo(topLeft.x, topLeft.y - wh);           // left
-    g.lineTo(topRight.x, topRight.y - wh);          // top
-    g.lineTo(bottomRight.x, bottomRight.y - wh);    // right
-    g.lineTo(bottomLeft.x, bottomLeft.y - wh);      // bottom
+    g.moveTo(tl.x, tl.y - wh);
+    g.lineTo(tr.x, tr.y - wh);
+    g.lineTo(br.x, br.y - wh);
+    g.lineTo(bl.x, bl.y - wh);
     g.closePath();
     g.fillPath();
-
-    // Roof outline
+    this.drawRoofPattern(g, tl, tr, br, bl, wh, b.roofColorDark);
     g.lineStyle(1, b.roofColorDark, 0.5);
     g.beginPath();
-    g.moveTo(topLeft.x, topLeft.y - wh);
-    g.lineTo(topRight.x, topRight.y - wh);
-    g.lineTo(bottomRight.x, bottomRight.y - wh);
-    g.lineTo(bottomLeft.x, bottomLeft.y - wh);
+    g.moveTo(tl.x, tl.y - wh); g.lineTo(tr.x, tr.y - wh);
+    g.lineTo(br.x, br.y - wh); g.lineTo(bl.x, bl.y - wh);
     g.closePath();
     g.strokePath();
 
-    // ─── Details per building type ───────────────────────────
+    // Building-specific details
     switch (b.detail) {
-      case 'house':
-        this.drawHouseDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
-      case 'kitchen':
-        this.drawKitchenDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
-      case 'bank':
-        this.drawBankDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
-      case 'warehouse':
-        this.drawWarehouseDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
-      case 'rest':
-        this.drawRestAreaDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
-      case 'hospital':
-        this.drawHospitalDetails(g, b, topLeft, topRight, bottomLeft, bottomRight, wh);
-        break;
+      case 'house': this.drawHouseDetails(g, b, tl, tr, bl, br, wh); break;
+      case 'kitchen': this.drawKitchenDetails(g, b, tl, tr, bl, br, wh); break;
+      case 'bank': this.drawBankDetails(g, b, tl, tr, bl, br, wh); break;
+      case 'warehouse': this.drawWarehouseDetails(g, b, tl, tr, bl, br, wh); break;
+      case 'rest': this.drawRestAreaDetails(g, b, tl, tr, bl, br, wh); break;
+      case 'hospital': this.drawHospitalDetails(g, b, tl, tr, bl, br, wh); break;
     }
   }
 
+  private drawWallBricks(
+    g: Phaser.GameObjects.Graphics,
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    wh: number,
+    wallColor: number,
+  ): void {
+    g.lineStyle(1, darken(wallColor, 12), 0.15);
+    const rows = Math.floor(wh / 8);
+    for (let i = 1; i <= rows; i++) {
+      const t = i / (rows + 1);
+      g.beginPath();
+      g.moveTo(p1.x, p1.y - wh + wh * t);
+      g.lineTo(p2.x, p2.y - wh + wh * t);
+      g.strokePath();
+    }
+  }
+
+  private drawRoofPattern(
+    g: Phaser.GameObjects.Graphics,
+    tl: { x: number; y: number },
+    tr: { x: number; y: number },
+    _br: { x: number; y: number },
+    bl: { x: number; y: number },
+    wh: number,
+    roofDark: number,
+  ): void {
+    g.lineStyle(1, roofDark, 0.2);
+    for (let i = 1; i <= 3; i++) {
+      const t = i / 4;
+      const x1 = tl.x + (bl.x - tl.x) * t;
+      const y1 = tl.y - wh + (bl.y - tl.y) * t;
+      const x2 = tr.x + (_br.x - tr.x) * t;
+      const y2 = tr.y - wh + (_br.y - tr.y) * t;
+      g.beginPath();
+      g.moveTo(x1, y1); g.lineTo(x2, y2);
+      g.strokePath();
+    }
+  }
+
+  // ─── Building Detail Methods ──────────────────────────────────
   private drawHouseDetails(
     g: Phaser.GameObjects.Graphics, _b: IsoBuilding,
     tl: { x: number; y: number }, tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Door on right (front) face
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
+    g.fillStyle(0x705838, 1);
+    g.fillRect(doorCX - 5, doorCY - wh * 0.48, 10, wh * 0.44);
     g.fillStyle(0x8b6f47, 1);
-    g.fillRect(doorCX - 4, doorCY - wh * 0.45, 8, wh * 0.4);
-    // Door knob
+    g.fillRect(doorCX - 4, doorCY - wh * 0.46, 8, wh * 0.4);
+    g.lineStyle(1, 0x705838, 0.4);
+    g.strokeRect(doorCX - 3, doorCY - wh * 0.44, 3, wh * 0.16);
+    g.strokeRect(doorCX, doorCY - wh * 0.44, 3, wh * 0.16);
+    g.strokeRect(doorCX - 3, doorCY - wh * 0.24, 3, wh * 0.16);
+    g.strokeRect(doorCX, doorCY - wh * 0.24, 3, wh * 0.16);
     g.fillStyle(0xffd700, 1);
     g.fillCircle(doorCX + 2, doorCY - wh * 0.28, 1.5);
 
-    // Window on left face
     const winLX = (tl.x + bl.x) / 2;
     const winLY = (tl.y + bl.y) / 2 - wh * 0.55;
+    g.fillStyle(0xff9eae, 0.8);
+    g.fillRect(winLX - 8, winLY - 1, 3, 10);
+    g.fillRect(winLX + 5, winLY - 1, 3, 10);
     g.fillStyle(0x87ceeb, 0.8);
     g.fillRect(winLX - 5, winLY, 10, 8);
-    g.lineStyle(1, 0x6a5040, 0.6);
+    g.lineStyle(1, 0x6a5040, 0.7);
     g.strokeRect(winLX - 5, winLY, 10, 8);
-    // Window cross
     g.beginPath();
-    g.moveTo(winLX, winLY);
-    g.lineTo(winLX, winLY + 8);
-    g.moveTo(winLX - 5, winLY + 4);
-    g.lineTo(winLX + 5, winLY + 4);
+    g.moveTo(winLX, winLY); g.lineTo(winLX, winLY + 8);
+    g.moveTo(winLX - 5, winLY + 4); g.lineTo(winLX + 5, winLY + 4);
     g.strokePath();
+    g.fillStyle(0xffffff, 0.3);
+    g.fillRect(winLX - 4, winLY + 1, 3, 2);
+    g.fillStyle(0x8b6040, 1);
+    g.fillRect(winLX - 5, winLY + 8, 10, 2);
+    const fcolors = [0xff6680, 0xff9eae, 0xffcc44];
+    for (let i = 0; i < 3; i++) {
+      g.fillStyle(fcolors[i], 0.9);
+      g.fillCircle(winLX - 3 + i * 3, winLY + 7, 1.5);
+    }
 
-    // Chimney on roof
     const chimneyX = (tl.x + tr.x) / 2 + 5;
     const chimneyY = (tl.y + tr.y) / 2 - wh - 2;
     g.fillStyle(0xb0856a, 1);
     g.fillRect(chimneyX - 3, chimneyY - 10, 6, 12);
+    g.fillStyle(0xa07858, 1);
+    g.fillRect(chimneyX - 3, chimneyY - 7, 6, 1);
+    g.fillRect(chimneyX - 3, chimneyY - 4, 6, 1);
     g.fillStyle(0xc9a088, 1);
     g.fillRect(chimneyX - 4, chimneyY - 11, 8, 3);
-
-    // Smoke puffs
-    g.fillStyle(0xdddddd, 0.4);
+    g.fillStyle(0xdddddd, 0.35);
     g.fillCircle(chimneyX, chimneyY - 14, 3);
+    g.fillStyle(0xdddddd, 0.25);
     g.fillCircle(chimneyX - 2, chimneyY - 18, 2.5);
+    g.fillStyle(0xdddddd, 0.15);
     g.fillCircle(chimneyX + 1, chimneyY - 21, 2);
+
+    g.fillStyle(0xc0a888, 1);
+    g.fillRect(doorCX - 5, doorCY - wh * 0.05, 10, 2);
   }
 
   private drawKitchenDetails(
     g: Phaser.GameObjects.Graphics, _b: IsoBuilding,
     tl: { x: number; y: number }, tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Two windows on left face
     for (let i = 0; i < 2; i++) {
       const t = 0.3 + i * 0.4;
       const wx = tl.x + (bl.x - tl.x) * t;
       const wy = tl.y + (bl.y - tl.y) * t - wh * 0.55;
+      g.fillStyle(0xffeebb, 0.15);
+      g.fillCircle(wx, wy + 4, 8);
       g.fillStyle(0xffeebb, 0.9);
       g.fillRect(wx - 5, wy, 10, 8);
-      g.lineStyle(1, 0x8b6f47, 0.6);
+      g.lineStyle(1, 0x8b6f47, 0.7);
       g.strokeRect(wx - 5, wy, 10, 8);
-      // Cross
       g.beginPath();
-      g.moveTo(wx, wy);
-      g.lineTo(wx, wy + 8);
-      g.moveTo(wx - 5, wy + 4);
-      g.lineTo(wx + 5, wy + 4);
+      g.moveTo(wx, wy); g.lineTo(wx, wy + 8);
+      g.moveTo(wx - 5, wy + 4); g.lineTo(wx + 5, wy + 4);
       g.strokePath();
+      g.fillStyle(0xffffff, 0.25);
+      g.fillRect(wx - 4, wy + 1, 2, 2);
     }
-
-    // Two windows on right (front) face
     for (let i = 0; i < 2; i++) {
       const t = 0.3 + i * 0.4;
       const wx = bl.x + (br.x - bl.x) * t;
       const wy = bl.y + (br.y - bl.y) * t - wh * 0.55;
+      g.fillStyle(0xffeebb, 0.15);
+      g.fillCircle(wx, wy + 4, 8);
       g.fillStyle(0xffeebb, 0.9);
       g.fillRect(wx - 5, wy, 10, 8);
-      g.lineStyle(1, 0x8b6f47, 0.6);
+      g.lineStyle(1, 0x8b6f47, 0.7);
       g.strokeRect(wx - 5, wy, 10, 8);
       g.beginPath();
-      g.moveTo(wx, wy);
-      g.lineTo(wx, wy + 8);
-      g.moveTo(wx - 5, wy + 4);
-      g.lineTo(wx + 5, wy + 4);
+      g.moveTo(wx, wy); g.lineTo(wx, wy + 8);
+      g.moveTo(wx - 5, wy + 4); g.lineTo(wx + 5, wy + 4);
       g.strokePath();
+      g.fillStyle(0xffffff, 0.25);
+      g.fillRect(wx - 4, wy + 1, 2, 2);
     }
 
-    // Big door on front face
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
+    g.fillStyle(0xff6644, 0.7);
+    g.fillTriangle(doorCX - 10, doorCY - wh * 0.5, doorCX + 10, doorCY - wh * 0.5, doorCX, doorCY - wh * 0.55);
+    g.fillStyle(0xcc4422, 0.5);
+    g.fillRect(doorCX - 10, doorCY - wh * 0.5, 20, 2);
     g.fillStyle(0x8b6040, 1);
-    g.fillRect(doorCX - 6, doorCY - wh * 0.45, 12, wh * 0.4);
+    g.fillRect(doorCX - 6, doorCY - wh * 0.48, 12, wh * 0.43);
     g.lineStyle(1, 0x6a4530, 0.6);
-    g.strokeRect(doorCX - 6, doorCY - wh * 0.45, 12, wh * 0.4);
+    g.strokeRect(doorCX - 6, doorCY - wh * 0.48, 12, wh * 0.43);
+    g.fillStyle(0xffeebb, 0.7);
+    g.fillRect(doorCX - 4, doorCY - wh * 0.44, 8, 6);
 
-    // Chimney with steam
     const chimneyX = tr.x - 8;
     const chimneyY = tr.y - wh - 2;
     g.fillStyle(0xa06848, 1);
     g.fillRect(chimneyX - 3, chimneyY - 12, 6, 14);
+    g.fillStyle(0x906038, 1);
+    g.fillRect(chimneyX - 3, chimneyY - 8, 6, 1);
     g.fillStyle(0xb87858, 1);
     g.fillRect(chimneyX - 4, chimneyY - 13, 8, 3);
-
-    // Steam puffs (more than house)
-    g.fillStyle(0xeeeeee, 0.35);
+    g.fillStyle(0xeeeeee, 0.3);
     g.fillCircle(chimneyX, chimneyY - 16, 3.5);
     g.fillCircle(chimneyX + 2, chimneyY - 20, 3);
     g.fillCircle(chimneyX - 1, chimneyY - 24, 2.5);
     g.fillCircle(chimneyX + 1, chimneyY - 27, 2);
+    g.fillCircle(chimneyX - 2, chimneyY - 30, 1.5);
 
-    // Roof decoration: small flag
     const flagX = (tl.x + tr.x) / 2;
     const flagY = (tl.y + tr.y) / 2 - wh;
     g.lineStyle(1, 0x6a4530, 1);
     g.beginPath();
-    g.moveTo(flagX, flagY);
-    g.lineTo(flagX, flagY - 10);
+    g.moveTo(flagX, flagY); g.lineTo(flagX, flagY - 10);
     g.strokePath();
     g.fillStyle(0xff6644, 1);
     g.fillTriangle(flagX, flagY - 10, flagX + 6, flagY - 8, flagX, flagY - 6);
+
+    const barrelX = doorCX + 12;
+    const barrelY = doorCY - 2;
+    g.fillStyle(0x8b6040, 1);
+    g.fillEllipse(barrelX, barrelY - 4, 7, 8);
+    g.fillStyle(0x705030, 1);
+    g.fillRect(barrelX - 3.5, barrelY - 2, 7, 1);
+    g.fillRect(barrelX - 3.5, barrelY - 6, 7, 1);
+    g.fillStyle(0xa07850, 1);
+    g.fillEllipse(barrelX, barrelY - 8, 6, 3);
   }
 
   private drawBankDetails(
     g: Phaser.GameObjects.Graphics, _b: IsoBuilding,
     tl: { x: number; y: number }, _tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Columns on the front (right) face
     for (let i = 0; i < 3; i++) {
       const t = 0.2 + i * 0.3;
       const cx = bl.x + (br.x - bl.x) * t;
       const cy = bl.y + (br.y - bl.y) * t;
-      // Column
       g.fillStyle(0xe8e0d0, 1);
       g.fillRect(cx - 2, cy - wh * 0.85, 4, wh * 0.8);
-      // Column capital
+      g.fillStyle(0xf0ece0, 1);
+      g.fillRect(cx - 1, cy - wh * 0.85, 1, wh * 0.8);
       g.fillStyle(0xffd700, 0.8);
       g.fillRect(cx - 3, cy - wh * 0.87, 6, 3);
-      // Column base
       g.fillRect(cx - 3, cy - wh * 0.08, 6, 3);
     }
 
-    // Windows on left face
     for (let i = 0; i < 2; i++) {
       const t = 0.3 + i * 0.4;
       const wx = tl.x + (bl.x - tl.x) * t;
       const wy = tl.y + (bl.y - tl.y) * t - wh * 0.55;
       g.fillStyle(0xf0e8a0, 0.8);
       g.fillRect(wx - 5, wy, 10, 10);
+      g.fillStyle(0xf0e8a0, 0.8);
+      g.beginPath();
+      g.arc(wx, wy, 5, Math.PI, 0);
+      g.fillPath();
       g.lineStyle(1, 0xc8b040, 0.6);
       g.strokeRect(wx - 5, wy, 10, 10);
-      // Arch top
       g.beginPath();
       g.arc(wx, wy, 5, Math.PI, 0);
       g.strokePath();
+      g.fillStyle(0xffffff, 0.2);
+      g.fillRect(wx - 4, wy + 1, 2, 3);
     }
 
-    // Grand door
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
     g.fillStyle(0xc8a040, 1);
     g.fillRect(doorCX - 7, doorCY - wh * 0.5, 14, wh * 0.45);
     g.lineStyle(1, 0xa08030, 0.8);
     g.strokeRect(doorCX - 7, doorCY - wh * 0.5, 14, wh * 0.45);
-    // Door arch
+    g.fillStyle(0xd8b050, 1);
     g.beginPath();
     g.arc(doorCX, doorCY - wh * 0.5, 7, Math.PI, 0);
-    g.fillStyle(0xd8b050, 1);
     g.fillPath();
+    g.fillStyle(0xffd700, 1);
+    g.fillCircle(doorCX - 2, doorCY - wh * 0.28, 1.5);
+    g.fillCircle(doorCX + 2, doorCY - wh * 0.28, 1.5);
 
-    // Gold coin symbol on roof
     const coinX = (tl.x + br.x) / 2;
     const coinY = (tl.y + br.y) / 2 - wh;
     g.fillStyle(0xffd700, 1);
     g.fillCircle(coinX, coinY - 2, 5);
     g.fillStyle(0xe8c200, 1);
     g.fillCircle(coinX, coinY - 2, 3);
-    // Dollar sign
+    g.fillStyle(0xfff0a0, 1);
+    g.fillCircle(coinX - 1, coinY - 3, 1);
     g.lineStyle(1, 0xc8a000, 1);
     g.beginPath();
-    g.moveTo(coinX, coinY - 5);
-    g.lineTo(coinX, coinY + 1);
+    g.moveTo(coinX, coinY - 5); g.lineTo(coinX, coinY + 1);
     g.strokePath();
+
+    g.fillStyle(0xe0d8c8, 1);
+    g.fillRect(doorCX - 8, doorCY - wh * 0.06, 16, 2);
+    g.fillStyle(0xd0c8b8, 1);
+    g.fillRect(doorCX - 9, doorCY - wh * 0.03, 18, 2);
   }
 
   private drawWarehouseDetails(
     g: Phaser.GameObjects.Graphics, b: IsoBuilding,
     tl: { x: number; y: number }, _tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Wooden plank lines on left face
     g.lineStyle(1, darken(b.wallLeft, 20), 0.3);
     for (let i = 1; i < 5; i++) {
       const t = i / 5;
       g.beginPath();
-      g.moveTo(tl.x, tl.y - wh + (wh * t));
-      g.lineTo(bl.x, bl.y - wh + (wh * t));
+      g.moveTo(tl.x, tl.y - wh + wh * t);
+      g.lineTo(bl.x, bl.y - wh + wh * t);
       g.strokePath();
     }
-
-    // Wooden plank lines on right face
+    for (let i = 1; i < 3; i++) {
+      const t = i / 3;
+      const x1 = tl.x + (bl.x - tl.x) * t;
+      const y1 = tl.y + (bl.y - tl.y) * t;
+      g.beginPath();
+      g.moveTo(x1, y1 - wh); g.lineTo(x1, y1);
+      g.strokePath();
+    }
     for (let i = 1; i < 5; i++) {
       const t = i / 5;
       g.beginPath();
-      g.moveTo(bl.x, bl.y - wh + (wh * t));
-      g.lineTo(br.x, br.y - wh + (wh * t));
+      g.moveTo(bl.x, bl.y - wh + wh * t);
+      g.lineTo(br.x, br.y - wh + wh * t);
       g.strokePath();
     }
 
-    // Large door (warehouse gate)
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
     g.fillStyle(0x6a5438, 1);
     g.fillRect(doorCX - 10, doorCY - wh * 0.65, 20, wh * 0.6);
     g.lineStyle(1, 0x504028, 0.7);
     g.strokeRect(doorCX - 10, doorCY - wh * 0.65, 20, wh * 0.6);
-    // Cross brace on door
     g.beginPath();
     g.moveTo(doorCX - 10, doorCY - wh * 0.65);
     g.lineTo(doorCX + 10, doorCY - wh * 0.05);
     g.moveTo(doorCX + 10, doorCY - wh * 0.65);
     g.lineTo(doorCX - 10, doorCY - wh * 0.05);
     g.strokePath();
+    g.fillStyle(0x888888, 1);
+    g.fillRect(doorCX - 1, doorCY - wh * 0.35, 2, 4);
 
-    // Small crate next to building
-    const crateX = br.x + 6;
-    const crateY = br.y - 4;
-    g.fillStyle(0xa08050, 1);
-    g.fillRect(crateX - 5, crateY - 8, 10, 8);
-    g.lineStyle(1, 0x705830, 0.6);
-    g.strokeRect(crateX - 5, crateY - 8, 10, 8);
+    this.drawCrate(g, br.x + 6, br.y - 4, 10, 8, 0xa08050);
+    this.drawCrate(g, br.x + 14, br.y - 2, 8, 6, 0x907840);
+    this.drawCrate(g, br.x + 8, br.y - 12, 8, 7, 0xb09060);
+
+    g.fillStyle(0xc8b888, 1);
+    g.fillEllipse(bl.x - 8, bl.y - 3, 8, 6);
+    g.fillStyle(0xb8a878, 1);
+    g.fillEllipse(bl.x - 8, bl.y - 6, 6, 3);
+  }
+
+  private drawCrate(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, color: number): void {
+    g.fillStyle(color, 1);
+    g.fillRect(x - w / 2, y - h, w, h);
+    g.lineStyle(1, darken(color, 30), 0.6);
+    g.strokeRect(x - w / 2, y - h, w, h);
     g.beginPath();
-    g.moveTo(crateX, crateY - 8);
-    g.lineTo(crateX, crateY);
-    g.moveTo(crateX - 5, crateY - 4);
-    g.lineTo(crateX + 5, crateY - 4);
+    g.moveTo(x, y - h); g.lineTo(x, y);
+    g.moveTo(x - w / 2, y - h / 2); g.lineTo(x + w / 2, y - h / 2);
     g.strokePath();
   }
 
@@ -581,146 +632,135 @@ export class MainScene extends Phaser.Scene {
     g: Phaser.GameObjects.Graphics, _b: IsoBuilding,
     tl: { x: number; y: number }, _tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Windows on left face
-    for (let i = 0; i < 2; i++) {
-      const t = 0.3 + i * 0.4;
-      const wx = tl.x + (bl.x - tl.x) * t;
-      const wy = tl.y + (bl.y - tl.y) * t - wh * 0.55;
+    const drawCurtainWindow = (wx: number, wy: number) => {
       g.fillStyle(0xb0eedd, 0.8);
       g.fillRect(wx - 5, wy, 10, 8);
       g.lineStyle(1, 0x68b8a8, 0.6);
       g.strokeRect(wx - 5, wy, 10, 8);
-      // Curtain tops
-      g.fillStyle(0x96ddd0, 0.6);
-      g.fillRect(wx - 5, wy, 10, 2);
-    }
-
-    // Windows on front face
+      g.fillStyle(0x96ddd0, 0.7);
+      g.fillRect(wx - 5, wy, 3, 8);
+      g.fillRect(wx + 2, wy, 3, 8);
+      g.fillStyle(0x888888, 0.6);
+      g.fillRect(wx - 6, wy - 1, 12, 1);
+      g.fillStyle(0xffffff, 0.2);
+      g.fillRect(wx - 1, wy + 1, 2, 2);
+    };
     for (let i = 0; i < 2; i++) {
       const t = 0.3 + i * 0.4;
-      const wx = bl.x + (br.x - bl.x) * t;
-      const wy = bl.y + (br.y - bl.y) * t - wh * 0.55;
-      g.fillStyle(0xb0eedd, 0.8);
-      g.fillRect(wx - 5, wy, 10, 8);
-      g.lineStyle(1, 0x68b8a8, 0.6);
-      g.strokeRect(wx - 5, wy, 10, 8);
-      g.fillStyle(0x96ddd0, 0.6);
-      g.fillRect(wx - 5, wy, 10, 2);
+      drawCurtainWindow(tl.x + (bl.x - tl.x) * t, tl.y + (bl.y - tl.y) * t - wh * 0.55);
+      drawCurtainWindow(bl.x + (br.x - bl.x) * t, bl.y + (br.y - bl.y) * t - wh * 0.55);
     }
 
-    // Door with a plant beside it
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
     g.fillStyle(0x68b8a8, 1);
     g.fillRect(doorCX - 5, doorCY - wh * 0.45, 10, wh * 0.4);
     g.lineStyle(1, 0x508878, 0.6);
     g.strokeRect(doorCX - 5, doorCY - wh * 0.45, 10, wh * 0.4);
+    g.fillStyle(0xb0eedd, 0.6);
+    g.fillRect(doorCX - 3, doorCY - wh * 0.42, 6, 5);
 
-    // Small potted plant near door
-    const plantX = doorCX + 10;
-    const plantY = doorCY - wh * 0.08;
-    g.fillStyle(0x8b6040, 1);
-    g.fillRect(plantX - 3, plantY - 4, 6, 5);
-    g.fillStyle(0x4caf50, 1);
-    g.fillCircle(plantX, plantY - 7, 4);
-    g.fillStyle(0x66bb6a, 1);
-    g.fillCircle(plantX - 2, plantY - 9, 3);
-    g.fillCircle(plantX + 2, plantY - 8, 3);
+    const drawPottedPlant = (px: number, py: number) => {
+      g.fillStyle(0x8b6040, 1);
+      g.fillRect(px - 3, py - 4, 6, 5);
+      g.fillStyle(0x705030, 1);
+      g.fillRect(px - 2, py - 4, 4, 1);
+      g.fillStyle(0x4caf50, 1);
+      g.fillCircle(px, py - 7, 4);
+      g.fillStyle(0x66bb6a, 1);
+      g.fillCircle(px - 2, py - 9, 3);
+      g.fillCircle(px + 2, py - 8, 3);
+      g.fillStyle(0x7ecc7e, 0.6);
+      g.fillCircle(px + 1, py - 10, 2);
+    };
+    drawPottedPlant(doorCX + 10, doorCY - wh * 0.08);
+    drawPottedPlant(doorCX - 10, doorCY - wh * 0.08);
 
-    // Flower patches near building base
-    const flowerColors = [0xff9eae, 0xffd700, 0xff8a4c, 0xffb3c1];
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const fx = bl.x - 10 + Math.cos(angle) * 8;
+    const flowerColors = [0xff9eae, 0xffd700, 0xff8a4c, 0xffb3c1, 0xc8a0ff];
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const fx = bl.x - 10 + Math.cos(angle) * 10;
       const fy = bl.y + 3 + Math.sin(angle) * 4;
+      g.fillStyle(0x4caf50, 0.6);
+      g.fillRect(fx, fy, 1, 2);
       g.fillStyle(flowerColors[i % flowerColors.length], 0.9);
-      g.fillCircle(fx, fy, 2);
+      g.fillCircle(fx, fy - 1, 2);
+      g.fillStyle(0xffee58, 0.8);
+      g.fillCircle(fx, fy - 1, 0.8);
     }
 
-    // Roof garden feel - small leaf symbols on roof
     const roofCX = (tl.x + br.x) / 2;
     const roofCY = (tl.y + br.y) / 2 - wh;
-    g.fillStyle(0x4caf50, 0.4);
-    g.fillCircle(roofCX - 5, roofCY + 1, 3);
-    g.fillCircle(roofCX + 5, roofCY - 1, 3);
+    g.fillStyle(0x4caf50, 0.35);
+    g.fillCircle(roofCX - 6, roofCY + 1, 3);
+    g.fillCircle(roofCX + 6, roofCY - 1, 3);
     g.fillCircle(roofCX, roofCY - 3, 2.5);
+    g.fillStyle(0xff9eae, 0.4);
+    g.fillCircle(roofCX - 4, roofCY, 1);
+    g.fillCircle(roofCX + 4, roofCY - 2, 1);
   }
 
   private drawHospitalDetails(
     g: Phaser.GameObjects.Graphics, _b: IsoBuilding,
     tl: { x: number; y: number }, _tr: { x: number; y: number },
     bl: { x: number; y: number }, br: { x: number; y: number },
-    wh: number
+    wh: number,
   ): void {
-    // Windows on left face
-    for (let i = 0; i < 2; i++) {
-      const t = 0.3 + i * 0.4;
-      const wx = tl.x + (bl.x - tl.x) * t;
-      const wy = tl.y + (bl.y - tl.y) * t - wh * 0.55;
-      g.fillStyle(0xd0eeff, 0.9);
-      g.fillRect(wx - 5, wy, 10, 8);
-      g.lineStyle(1, 0xaabbcc, 0.6);
-      g.strokeRect(wx - 5, wy, 10, 8);
-      // Cross
-      g.beginPath();
-      g.moveTo(wx, wy);
-      g.lineTo(wx, wy + 8);
-      g.moveTo(wx - 5, wy + 4);
-      g.lineTo(wx + 5, wy + 4);
-      g.strokePath();
-    }
-
-    // Windows on front face
-    for (let i = 0; i < 2; i++) {
-      const t = 0.3 + i * 0.4;
-      const wx = bl.x + (br.x - bl.x) * t;
-      const wy = bl.y + (br.y - bl.y) * t - wh * 0.55;
+    const drawCleanWindow = (wx: number, wy: number) => {
       g.fillStyle(0xd0eeff, 0.9);
       g.fillRect(wx - 5, wy, 10, 8);
       g.lineStyle(1, 0xaabbcc, 0.6);
       g.strokeRect(wx - 5, wy, 10, 8);
       g.beginPath();
-      g.moveTo(wx, wy);
-      g.lineTo(wx, wy + 8);
-      g.moveTo(wx - 5, wy + 4);
-      g.lineTo(wx + 5, wy + 4);
+      g.moveTo(wx, wy); g.lineTo(wx, wy + 8);
+      g.moveTo(wx - 5, wy + 4); g.lineTo(wx + 5, wy + 4);
       g.strokePath();
+      g.fillStyle(0xffffff, 0.3);
+      g.fillRect(wx - 4, wy + 1, 2, 2);
+    };
+    for (let i = 0; i < 2; i++) {
+      const t = 0.3 + i * 0.4;
+      drawCleanWindow(tl.x + (bl.x - tl.x) * t, tl.y + (bl.y - tl.y) * t - wh * 0.55);
+      drawCleanWindow(bl.x + (br.x - bl.x) * t, bl.y + (br.y - bl.y) * t - wh * 0.55);
     }
 
-    // Door
     const doorCX = (bl.x + br.x) / 2;
     const doorCY = (bl.y + br.y) / 2;
     g.fillStyle(0xdddddd, 1);
     g.fillRect(doorCX - 6, doorCY - wh * 0.45, 12, wh * 0.4);
     g.lineStyle(1, 0xbbbbbb, 0.6);
     g.strokeRect(doorCX - 6, doorCY - wh * 0.45, 12, wh * 0.4);
-    // Double door line
     g.beginPath();
     g.moveTo(doorCX, doorCY - wh * 0.45);
     g.lineTo(doorCX, doorCY - wh * 0.05);
     g.strokePath();
+    g.fillStyle(0xd0eeff, 0.6);
+    g.fillRect(doorCX - 5, doorCY - wh * 0.42, 4, 5);
+    g.fillRect(doorCX + 1, doorCY - wh * 0.42, 4, 5);
 
-    // Red cross on roof
     const crossX = (tl.x + br.x) / 2;
     const crossY = (tl.y + br.y) / 2 - wh;
-    g.fillStyle(0xff6b6b, 1);
+    g.fillStyle(0xffffff, 0.8);
+    g.fillCircle(crossX, crossY, 7);
+    g.fillStyle(0xff4444, 1);
     g.fillRect(crossX - 2, crossY - 6, 4, 12);
     g.fillRect(crossX - 6, crossY - 2, 12, 4);
 
-    // Red cross on front wall (visible)
     const wallCrossX = (bl.x + br.x) / 2;
     const wallCrossY = (bl.y + br.y) / 2 - wh * 0.78;
-    g.fillStyle(0xff6b6b, 0.8);
+    g.fillStyle(0xff4444, 0.7);
     g.fillRect(wallCrossX - 1.5, wallCrossY - 4, 3, 8);
     g.fillRect(wallCrossX - 4, wallCrossY - 1.5, 8, 3);
+
+    g.fillStyle(0x88bbcc, 0.6);
+    g.fillRect(doorCX - 7, doorCY - wh * 0.05, 14, 2);
   }
 
-  // ─── Decorations ──────────────────────────────────────────────
+  // ─── Decorations (sprites) ────────────────────────────────────
   private createDecorations(): void {
     this.decorations = [
-      // Trees
       { type: 'tree', gridX: 0, gridY: 0 },
       { type: 'tree', gridX: 9, gridY: 0 },
       { type: 'tree', gridX: 0, gridY: 9 },
@@ -728,194 +768,70 @@ export class MainScene extends Phaser.Scene {
       { type: 'tree', gridX: 3, gridY: 3 },
       { type: 'tree', gridX: 8, gridY: 3 },
       { type: 'tree', gridX: 3, gridY: 6 },
-      // Flowers
       { type: 'flower', gridX: 0, gridY: 3 },
       { type: 'flower', gridX: 3, gridY: 0 },
       { type: 'flower', gridX: 9, gridY: 6 },
       { type: 'flower', gridX: 8, gridY: 9 },
       { type: 'flower', gridX: 0, gridY: 6 },
-      // Lamps
       { type: 'lamp', gridX: 4, gridY: 2 },
       { type: 'lamp', gridX: 4, gridY: 6 },
       { type: 'lamp', gridX: 4, gridY: 9 },
       { type: 'lamp', gridX: 2, gridY: 4 },
       { type: 'lamp', gridX: 6, gridY: 4 },
-      // Fountain
       { type: 'fountain', gridX: 4, gridY: 4 },
     ];
   }
 
-  private drawDecorations(): void {
-    // Sort decorations by depth
+  private placeDecorations(): void {
     const sorted = [...this.decorations].sort(
-      (a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY)
+      (a, b) => (a.gridX + a.gridY) - (b.gridX + b.gridY),
     );
-
     for (const d of sorted) {
-      const gfx = this.make.graphics({ x: 0, y: 0 }, false);
       const { x: sx, y: sy } = this.toScreen(d.gridX, d.gridY);
+      const baseY = sy + this.TILE_H / 2;
       const depth = this.isoDepth(d.gridX, d.gridY) + 5;
 
       switch (d.type) {
-        case 'tree':
-          this.drawTree(gfx, sx, sy);
+        case 'tree': {
+          // Shadow
+          const shadow = this.add.sprite(sx, baseY + 2, 'shadow-tree');
+          shadow.setOrigin(0.5, 0.5).setDepth(depth - 1);
+          this.decoContainer.add(shadow);
+          // Tree — pick variant based on position
+          const variant = Math.floor(tileRand(d.gridX, d.gridY, 100) * 3);
+          const treeKeys = ['tree-oak', 'tree-pine', 'tree-fruit'];
+          const tree = this.add.sprite(sx, baseY, treeKeys[variant]);
+          tree.setOrigin(16 / 32, 45 / 52).setDepth(depth);
+          this.decoContainer.add(tree);
           break;
-        case 'flower':
-          this.drawFlowerPatch(gfx, sx, sy);
+        }
+        case 'flower': {
+          const flower = this.add.sprite(sx, baseY, 'deco-flower');
+          flower.setOrigin(0.5, 10 / 16).setDepth(depth);
+          this.decoContainer.add(flower);
           break;
-        case 'lamp':
-          this.drawLampPost(gfx, sx, sy);
+        }
+        case 'lamp': {
+          const lamp = this.add.sprite(sx, baseY, 'deco-lamp');
+          lamp.setOrigin(0.5, 30 / 36).setDepth(depth);
+          this.decoContainer.add(lamp);
           break;
-        case 'fountain':
-          this.drawFountain(gfx, sx, sy);
+        }
+        case 'fountain': {
+          const fountain = this.add.sprite(sx, baseY, 'deco-fountain');
+          fountain.setOrigin(0.5, 18 / 28).setDepth(depth);
+          this.decoContainer.add(fountain);
           break;
+        }
       }
-
-      gfx.setDepth(depth);
-      this.decoContainer.add(gfx);
     }
   }
 
-  private drawTree(g: Phaser.GameObjects.Graphics, sx: number, sy: number): void {
-    const baseY = sy + this.TILE_H / 2;
-
-    // Shadow
-    g.fillStyle(0x000000, 0.06);
-    g.fillEllipse(sx, baseY + 2, 16, 6);
-
-    // Trunk
-    g.fillStyle(0x8b6f47, 1);
-    g.fillRect(sx - 2, baseY - 18, 4, 18);
-
-    // Foliage layers (round canopy, isometric style)
-    g.fillStyle(0x5ba84c, 1);
-    g.fillCircle(sx, baseY - 22, 10);
-    g.fillStyle(0x6ec45e, 1);
-    g.fillCircle(sx - 3, baseY - 25, 8);
-    g.fillCircle(sx + 3, baseY - 24, 8);
-    g.fillStyle(0x7ed66e, 1);
-    g.fillCircle(sx, baseY - 28, 7);
-
-    // Highlights
-    g.fillStyle(0x9ee88e, 0.5);
-    g.fillCircle(sx - 2, baseY - 30, 3);
-  }
-
-  private drawFlowerPatch(g: Phaser.GameObjects.Graphics, sx: number, sy: number): void {
-    const baseY = sy + this.TILE_H / 2;
-    const colors = [0xff9eae, 0xffd700, 0xffb3c1, 0xff8a4c, 0x7ecfc0];
-
-    // Small grass base
-    g.fillStyle(0x8ec986, 0.6);
-    g.fillEllipse(sx, baseY, 14, 6);
-
-    // Flowers
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2 + 0.3;
-      const r = 4 + (i % 2) * 2;
-      const fx = sx + Math.cos(angle) * r;
-      const fy = baseY + Math.sin(angle) * (r * 0.4) - 2;
-
-      // Stem
-      g.lineStyle(1, 0x4caf50, 0.8);
-      g.beginPath();
-      g.moveTo(fx, fy + 2);
-      g.lineTo(fx, fy - 1);
-      g.strokePath();
-
-      // Petal
-      g.fillStyle(colors[i % colors.length], 1);
-      g.fillCircle(fx, fy - 2, 2);
-
-      // Center
-      g.fillStyle(0xffee58, 1);
-      g.fillCircle(fx, fy - 2, 1);
-    }
-  }
-
-  private drawLampPost(g: Phaser.GameObjects.Graphics, sx: number, sy: number): void {
-    const baseY = sy + this.TILE_H / 2;
-
-    // Shadow
-    g.fillStyle(0x000000, 0.05);
-    g.fillEllipse(sx, baseY + 1, 8, 3);
-
-    // Post
-    g.fillStyle(0x4a4a4a, 1);
-    g.fillRect(sx - 1, baseY - 20, 2, 20);
-
-    // Lamp base
-    g.fillStyle(0x5a5a5a, 1);
-    g.fillRect(sx - 3, baseY - 21, 6, 2);
-
-    // Lamp glass
-    g.fillStyle(0xfff8e0, 0.9);
-    g.fillRect(sx - 3, baseY - 26, 6, 5);
-
-    // Lamp top
-    g.fillStyle(0x4a4a4a, 1);
-    g.fillRect(sx - 4, baseY - 27, 8, 2);
-
-    // Glow
-    g.fillStyle(0xfff8c0, 0.15);
-    g.fillCircle(sx, baseY - 23, 8);
-  }
-
-  private drawFountain(g: Phaser.GameObjects.Graphics, sx: number, sy: number): void {
-    const baseY = sy + this.TILE_H / 2;
-
-    // Base pool (isometric ellipse)
-    g.fillStyle(0xc0d8e8, 0.7);
-    g.fillEllipse(sx, baseY, 28, 12);
-
-    // Water surface
-    g.fillStyle(0x88c0e8, 0.6);
-    g.fillEllipse(sx, baseY - 1, 24, 10);
-
-    // Stone rim
-    g.lineStyle(2, 0xa0a0a0, 0.8);
-    g.strokeEllipse(sx, baseY, 28, 12);
-
-    // Center pillar
-    g.fillStyle(0xc0c0c0, 1);
-    g.fillRect(sx - 2, baseY - 14, 4, 14);
-
-    // Top bowl
-    g.fillStyle(0xb0b0b0, 1);
-    g.fillEllipse(sx, baseY - 14, 10, 4);
-    g.fillStyle(0x88c0e8, 0.8);
-    g.fillEllipse(sx, baseY - 14.5, 8, 3);
-
-    // Water streams (arcs)
-    g.lineStyle(1, 0x88c0e8, 0.6);
-    // Left stream
-    g.beginPath();
-    g.arc(sx - 6, baseY - 12, 6, -Math.PI * 0.7, -Math.PI * 0.2);
-    g.strokePath();
-    // Right stream
-    g.beginPath();
-    g.arc(sx + 6, baseY - 12, 6, -Math.PI * 0.8, -Math.PI * 0.3);
-    g.strokePath();
-
-    // Water droplets
-    g.fillStyle(0xa0d8f0, 0.5);
-    g.fillCircle(sx - 8, baseY - 6, 1.5);
-    g.fillCircle(sx + 8, baseY - 7, 1.5);
-    g.fillCircle(sx - 5, baseY - 4, 1);
-    g.fillCircle(sx + 6, baseY - 3, 1);
-
-    // Sparkle on water
-    g.fillStyle(0xffffff, 0.6);
-    g.fillCircle(sx + 3, baseY - 15, 1);
-    g.fillCircle(sx - 4, baseY + 1, 1);
-  }
-
-  // ─── Characters ───────────────────────────────────────────────
+  // ─── Characters (sprite-based with animation) ─────────────────
   private createCharacters(): void {
     const charDefs = [
       {
-        color: 0x4488dd, colorDark: 0x3366bb, colorLight: 0x66aaff,
-        skinColor: 0xffe0c0, label: 'Blue',
+        label: 'Blue',
         waypoints: [
           { gx: 2, gy: 3 }, { gx: 4, gy: 3 }, { gx: 4, gy: 6 },
           { gx: 7, gy: 6 }, { gx: 7, gy: 4 }, { gx: 4, gy: 4 },
@@ -923,8 +839,7 @@ export class MainScene extends Phaser.Scene {
         ],
       },
       {
-        color: 0xff8844, colorDark: 0xdd6622, colorLight: 0xffaa66,
-        skinColor: 0xffd8b0, label: 'Orange',
+        label: 'Orange',
         waypoints: [
           { gx: 5, gy: 3 }, { gx: 5, gy: 4 }, { gx: 7, gy: 4 },
           { gx: 7, gy: 7 }, { gx: 4, gy: 7 }, { gx: 4, gy: 4 },
@@ -932,8 +847,7 @@ export class MainScene extends Phaser.Scene {
         ],
       },
       {
-        color: 0x44aa66, colorDark: 0x338855, colorLight: 0x66cc88,
-        skinColor: 0xffd0a8, label: 'Green',
+        label: 'Green',
         waypoints: [
           { gx: 3, gy: 7 }, { gx: 4, gy: 7 }, { gx: 4, gy: 4 },
           { gx: 2, gy: 4 }, { gx: 2, gy: 7 }, { gx: 3, gy: 7 },
@@ -943,28 +857,38 @@ export class MainScene extends Phaser.Scene {
 
     for (const def of charDefs) {
       const startPos = this.toScreen(def.waypoints[0].gx + 0.5, def.waypoints[0].gy + 0.5);
-      const gfx = this.add.graphics();
+      const palette = PALETTES[def.label];
+      const nameKey = def.label.toLowerCase();
+
+      // Shadow sprite (stays at ground level)
+      const shadow = this.add.sprite(startPos.x, startPos.y + 3, 'shadow-char');
+      shadow.setOrigin(0.5, 0.5);
+      this.charContainer.add(shadow);
+
+      // Character sprite
+      const sprite = this.add.sprite(startPos.x, startPos.y, `char-${nameKey}-0`);
+      sprite.setOrigin(12 / 24, 40 / 46); // foot position
+      this.charContainer.add(sprite);
 
       const ch: IsoCharacter = {
-        gfx,
+        sprite,
+        shadow,
         gridX: def.waypoints[0].gx,
         gridY: def.waypoints[0].gy,
         screenX: startPos.x,
         screenY: startPos.y,
-        color: def.color,
-        colorDark: def.colorDark,
-        colorLight: def.colorLight,
-        skinColor: def.skinColor,
+        palette,
         currentWP: 0,
         waypoints: def.waypoints,
         bobOffset: 0,
         label: def.label,
+        isMoving: false,
+        emoteSprite: null,
       };
 
       this.characters.push(ch);
-      this.drawCharacter(ch);
 
-      // Bob animation
+      // Bob animation — only moves the character sprite, shadow stays
       this.tweens.add({
         targets: ch,
         bobOffset: -2,
@@ -972,86 +896,19 @@ export class MainScene extends Phaser.Scene {
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut',
-        onUpdate: () => this.drawCharacter(ch),
+        onUpdate: () => {
+          ch.sprite.setY(ch.screenY + ch.bobOffset);
+          ch.sprite.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 8);
+          ch.shadow.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 7);
+        },
       });
     }
   }
 
-  private drawCharacter(ch: IsoCharacter): void {
-    const g = ch.gfx;
-    g.clear();
-
-    const x = ch.screenX;
-    const y = ch.screenY + ch.bobOffset;
-
-    // Update depth based on approximate grid position
-    g.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 8);
-
-    // Shadow
-    g.fillStyle(0x000000, 0.1);
-    g.fillEllipse(x, ch.screenY + 2, 10, 4);
-
-    // ─── Body (pixel art style using small rects) ──────────────
-    const px = 1.5; // pixel size
-
-    // Feet (2 small rects)
-    g.fillStyle(ch.colorDark, 1);
-    g.fillRect(x - 3 * px, y - 1 * px, 2 * px, 1 * px);
-    g.fillRect(x + 1 * px, y - 1 * px, 2 * px, 1 * px);
-
-    // Legs
-    g.fillStyle(ch.color, 1);
-    g.fillRect(x - 2 * px, y - 3 * px, 2 * px, 2 * px);
-    g.fillRect(x + 0 * px, y - 3 * px, 2 * px, 2 * px);
-
-    // Body (torso)
-    g.fillStyle(ch.color, 1);
-    g.fillRect(x - 3 * px, y - 7 * px, 6 * px, 4 * px);
-
-    // Body lighter stripe
-    g.fillStyle(ch.colorLight, 1);
-    g.fillRect(x - 1 * px, y - 7 * px, 2 * px, 4 * px);
-
-    // Arms
-    g.fillStyle(ch.color, 1);
-    g.fillRect(x - 4 * px, y - 6 * px, 1 * px, 3 * px);
-    g.fillRect(x + 3 * px, y - 6 * px, 1 * px, 3 * px);
-
-    // Hands
-    g.fillStyle(ch.skinColor, 1);
-    g.fillRect(x - 4 * px, y - 3 * px, 1 * px, 1 * px);
-    g.fillRect(x + 3 * px, y - 3 * px, 1 * px, 1 * px);
-
-    // Head (round - slightly larger than body for cute proportions)
-    g.fillStyle(ch.skinColor, 1);
-    g.fillRect(x - 3 * px, y - 12 * px, 6 * px, 5 * px);
-    // Round top of head
-    g.fillRect(x - 2 * px, y - 13 * px, 4 * px, 1 * px);
-
-    // Hair
-    g.fillStyle(ch.colorDark, 1);
-    g.fillRect(x - 3 * px, y - 13 * px, 6 * px, 2 * px);
-    g.fillRect(x - 4 * px, y - 12 * px, 1 * px, 2 * px);
-    g.fillRect(x + 3 * px, y - 12 * px, 1 * px, 2 * px);
-
-    // Eyes (cute dot eyes)
-    g.fillStyle(0x2a2a2a, 1);
-    g.fillRect(x - 2 * px, y - 10 * px, 1 * px, 1 * px);
-    g.fillRect(x + 1 * px, y - 10 * px, 1 * px, 1 * px);
-
-    // Blush (cute cheek marks)
-    g.fillStyle(0xffaaaa, 0.5);
-    g.fillRect(x - 3 * px, y - 9 * px, 1 * px, 1 * px);
-    g.fillRect(x + 2 * px, y - 9 * px, 1 * px, 1 * px);
-
-    // Mouth (small smile)
-    g.fillStyle(0xcc8888, 1);
-    g.fillRect(x - 0.5 * px, y - 8.5 * px, 1 * px, 0.5 * px);
-  }
-
+  // ─── Character Movement ───────────────────────────────────────
   private animateCharacters(): void {
     for (let i = 0; i < this.characters.length; i++) {
-      this.time.delayedCall(i * 600, () => {
+      this.time.delayedCall(i * 800, () => {
         this.moveCharacterToNextWP(this.characters[i], i);
       });
     }
@@ -1062,6 +919,11 @@ export class MainScene extends Phaser.Scene {
     const nextWP = ch.waypoints[nextIdx];
     const target = this.toScreen(nextWP.gx + 0.5, nextWP.gy + 0.5);
     const speed = 1800 + index * 300;
+    const nameKey = ch.label.toLowerCase();
+
+    ch.isMoving = true;
+    // Start walk animation
+    ch.sprite.play(`char-${nameKey}-walk`);
 
     this.tweens.add({
       targets: ch,
@@ -1070,18 +932,66 @@ export class MainScene extends Phaser.Scene {
       duration: speed,
       ease: 'Linear',
       onUpdate: () => {
-        // Update grid position estimate for depth sorting
-        const approxGX = nextWP.gx;
-        const approxGY = nextWP.gy;
-        ch.gridX = approxGX;
-        ch.gridY = approxGY;
-        this.drawCharacter(ch);
+        ch.gridX = nextWP.gx;
+        ch.gridY = nextWP.gy;
+        ch.sprite.setX(ch.screenX);
+        ch.sprite.setY(ch.screenY + ch.bobOffset);
+        ch.shadow.setPosition(ch.screenX, ch.screenY + 3);
+        ch.sprite.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 8);
+        ch.shadow.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 7);
       },
       onComplete: () => {
         ch.currentWP = nextIdx;
         ch.gridX = nextWP.gx;
         ch.gridY = nextWP.gy;
-        this.moveCharacterToNextWP(ch, index);
+        ch.isMoving = false;
+        // Stop walk animation, show idle frame
+        ch.sprite.stop();
+        ch.sprite.setTexture(`char-${nameKey}-0`);
+
+        const pause = 400 + Math.random() * 800;
+        this.time.delayedCall(pause, () => {
+          this.moveCharacterToNextWP(ch, index);
+        });
+      },
+    });
+  }
+
+  // ─── Emote System (sprite-based) ─────────────────────────────
+  private startEmoteSystem(): void {
+    this.time.addEvent({
+      delay: 4000,
+      callback: () => this.triggerRandomEmote(),
+      callbackScope: this,
+      loop: true,
+    });
+  }
+
+  private triggerRandomEmote(): void {
+    const ch = this.characters[Math.floor(Math.random() * this.characters.length)];
+    if (ch.emoteSprite) return;
+
+    const emotes = ['heart', 'music', 'star', 'zzz', 'happy'];
+    const emoteKey = emotes[Math.floor(Math.random() * emotes.length)];
+
+    const emoteSprite = this.add.sprite(ch.screenX, ch.screenY - 38, `emote-${emoteKey}`);
+    emoteSprite.setOrigin(0.5, 1).setDepth(this.isoDepth(ch.gridX, ch.gridY) + 9);
+    this.charContainer.add(emoteSprite);
+    ch.emoteSprite = emoteSprite;
+
+    this.tweens.add({
+      targets: emoteSprite,
+      y: ch.screenY - 52,
+      alpha: 0,
+      duration: 2200,
+      ease: 'Cubic.easeOut',
+      onUpdate: () => {
+        emoteSprite.setX(ch.screenX);
+        emoteSprite.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 9);
+      },
+      onComplete: () => {
+        emoteSprite.destroy();
+        ch.emoteSprite = null;
       },
     });
   }
@@ -1089,29 +999,35 @@ export class MainScene extends Phaser.Scene {
   // ─── UI Overlay ───────────────────────────────────────────────
   private drawUIOverlay(width: number): void {
     const g = this.make.graphics({ x: 0, y: 0 }, false);
-
-    // Background bar - warm cream with slight transparency
     g.fillStyle(0xfef9f0, 0.92);
     g.fillRoundedRect(4, 4, width - 8, 34, 6);
-
-    // Border (pixel art style - double border)
     g.lineStyle(2, 0xe8d0b0, 1);
     g.strokeRoundedRect(4, 4, width - 8, 34, 6);
     g.lineStyle(1, 0xd4b898, 0.5);
     g.strokeRoundedRect(6, 6, width - 12, 30, 5);
-
-    // Small decorative dots at corners (pixel art feel)
     g.fillStyle(0xd4b898, 1);
     g.fillRect(10, 10, 2, 2);
     g.fillRect(width - 12, 10, 2, 2);
     g.fillRect(10, 30, 2, 2);
     g.fillRect(width - 12, 30, 2, 2);
-
     g.setDepth(100);
     this.uiContainer.add(g);
 
-    // Village name (left)
-    const villageText = this.add.text(20, 21, 'Tiny Traders Village', {
+    const iconG = this.make.graphics({ x: 0, y: 0 }, false);
+    const ix = 16;
+    const iy = 16;
+    iconG.fillStyle(0xff9eae, 1);
+    iconG.fillTriangle(ix, iy - 4, ix - 5, iy, ix + 5, iy);
+    iconG.fillStyle(0xe8d5be, 1);
+    iconG.fillRect(ix - 4, iy, 8, 6);
+    iconG.fillStyle(0x8b6f47, 1);
+    iconG.fillRect(ix - 1, iy + 2, 3, 4);
+    iconG.fillStyle(0x87ceeb, 0.8);
+    iconG.fillRect(ix + 2, iy + 1, 2, 2);
+    iconG.setDepth(101);
+    this.uiContainer.add(iconG);
+
+    const villageText = this.add.text(28, 21, 'Tiny Traders Village', {
       fontSize: '10px',
       color: '#6a5040',
       fontFamily: 'monospace',
@@ -1119,7 +1035,6 @@ export class MainScene extends Phaser.Scene {
     }).setOrigin(0, 0.5).setDepth(101);
     this.uiContainer.add(villageText);
 
-    // Day counter (center)
     const dayText = this.add.text(width / 2, 21, `Day ${this.currentDay}`, {
       fontSize: '11px',
       color: '#c8a040',
@@ -1128,23 +1043,18 @@ export class MainScene extends Phaser.Scene {
     }).setOrigin(0.5, 0.5).setDepth(101);
     this.uiContainer.add(dayText);
 
-    // Sun icon (pixel art) + weather (right)
     const sunG = this.make.graphics({ x: 0, y: 0 }, false);
     const sunX = width - 70;
     const sunY = 21;
-    // Sun body
     sunG.fillStyle(0xffd700, 1);
     sunG.fillCircle(sunX, sunY, 5);
-    // Sun rays
     sunG.fillStyle(0xffe44d, 1);
     for (let i = 0; i < 8; i++) {
       const angle = (i / 8) * Math.PI * 2;
-      sunG.fillRect(
-        sunX + Math.cos(angle) * 7 - 1,
-        sunY + Math.sin(angle) * 7 - 1,
-        2, 2
-      );
+      sunG.fillRect(sunX + Math.cos(angle) * 7 - 1, sunY + Math.sin(angle) * 7 - 1, 2, 2);
     }
+    sunG.fillStyle(0xffee88, 0.6);
+    sunG.fillCircle(sunX - 1, sunY - 1, 2);
     sunG.setDepth(101);
     this.uiContainer.add(sunG);
 
@@ -1156,11 +1066,10 @@ export class MainScene extends Phaser.Scene {
     this.uiContainer.add(weatherText);
   }
 
-  // ─── Ambient Particles ────────────────────────────────────────
+  // ─── Ambient Particles (Graphics — per-frame updates) ─────────
   private createAmbientParticles(width: number, height: number): void {
-    // Sparkle particles (floating stars)
     const sparkles: { x: number; y: number; phase: number; speed: number; size: number }[] = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 10; i++) {
       sparkles.push({
         x: 40 + Math.random() * (width - 80),
         y: 50 + Math.random() * (height - 80),
@@ -1170,9 +1079,9 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
-    // Leaf particles
-    const leaves: { x: number; y: number; vx: number; vy: number; rot: number; size: number }[] = [];
-    for (let i = 0; i < 5; i++) {
+    const leaves: { x: number; y: number; vx: number; vy: number; rot: number; size: number; color: number }[] = [];
+    const leafColors = [0x7ec07a, 0x8edd88, 0x6aaa66, 0xa0d088];
+    for (let i = 0; i < 6; i++) {
       leaves.push({
         x: Math.random() * width,
         y: 50 + Math.random() * (height - 80),
@@ -1180,55 +1089,72 @@ export class MainScene extends Phaser.Scene {
         vy: 0.1 + Math.random() * 0.2,
         rot: Math.random() * Math.PI * 2,
         size: 2 + Math.random() * 2,
+        color: leafColors[i % leafColors.length],
       });
     }
 
-    const g = this.particleGfx;
+    const butterflies: { x: number; y: number; phase: number; baseX: number; baseY: number; wingPhase: number }[] = [];
+    for (let i = 0; i < 2; i++) {
+      const bx = 80 + Math.random() * (width - 160);
+      const by = 80 + Math.random() * (height - 160);
+      butterflies.push({
+        x: bx, y: by, baseX: bx, baseY: by,
+        phase: Math.random() * Math.PI * 2,
+        wingPhase: Math.random() * Math.PI * 2,
+      });
+    }
+
+    const pg = this.particleGfx;
 
     this.tweens.addCounter({
-      from: 0,
-      to: 1,
+      from: 0, to: 1,
       duration: 4000,
       yoyo: true,
       repeat: -1,
       onUpdate: () => {
-        g.clear();
+        pg.clear();
         const time = this.time.now * 0.001;
 
-        // Draw sparkles (star shapes)
-        for (const s of sparkles) {
-          const alpha = 0.3 + 0.4 * Math.sin(time * s.speed + s.phase);
-          const cx = s.x + Math.sin(time * 0.3 + s.phase) * 10;
-          const cy = s.y + Math.cos(time * 0.2 + s.phase) * 8;
-
-          // 4-pointed star
-          g.fillStyle(0xffffff, alpha);
-          g.fillRect(cx - s.size, cy - 0.5, s.size * 2, 1);
-          g.fillRect(cx - 0.5, cy - s.size, 1, s.size * 2);
-          // Diagonal points (smaller)
-          g.fillStyle(0xfff8c0, alpha * 0.6);
-          const ds = s.size * 0.6;
-          g.fillRect(cx - ds * 0.7, cy - ds * 0.7, ds, ds);
-          g.fillRect(cx + ds * 0.1, cy + ds * 0.1, ds * 0.5, ds * 0.5);
+        for (const sp of sparkles) {
+          const alpha = 0.3 + 0.4 * Math.sin(time * sp.speed + sp.phase);
+          const cx = sp.x + Math.sin(time * 0.3 + sp.phase) * 10;
+          const cy = sp.y + Math.cos(time * 0.2 + sp.phase) * 8;
+          pg.fillStyle(0xffffff, alpha);
+          pg.fillRect(cx - sp.size, cy - 0.5, sp.size * 2, 1);
+          pg.fillRect(cx - 0.5, cy - sp.size, 1, sp.size * 2);
+          pg.fillStyle(0xfff8c0, alpha * 0.5);
+          const ds = sp.size * 0.5;
+          pg.fillRect(cx - ds, cy - ds, ds, ds);
+          pg.fillRect(cx, cy, ds, ds);
         }
 
-        // Draw leaves
         for (const l of leaves) {
           l.x += l.vx;
           l.y += l.vy + Math.sin(time + l.rot) * 0.3;
           l.rot += 0.02;
-
-          // Wrap around
           if (l.x > width + 10) l.x = -10;
           if (l.y > height + 10) l.y = 40;
+          pg.fillStyle(l.color, 0.45);
+          pg.fillEllipse(l.x, l.y, l.size * 2, l.size);
+          pg.fillStyle(darken(l.color, 20), 0.25);
+          pg.fillRect(l.x - l.size * 0.5, l.y - 0.5, l.size, 1);
+        }
 
-          g.fillStyle(0x7ec07a, 0.4);
-          g.save();
-          // Simple leaf shape (oval)
-          g.fillEllipse(l.x, l.y, l.size * 2, l.size);
-          g.fillStyle(0x6aaa66, 0.3);
-          g.fillEllipse(l.x + 0.5, l.y + 0.5, l.size * 1.5, l.size * 0.7);
-          g.restore();
+        for (const bf of butterflies) {
+          bf.phase += 0.008;
+          bf.wingPhase += 0.15;
+          bf.x = bf.baseX + Math.sin(bf.phase) * 30;
+          bf.y = bf.baseY + Math.cos(bf.phase * 0.7) * 15;
+          const wingOpen = Math.abs(Math.sin(bf.wingPhase));
+          const wingW = 2 + wingOpen * 2;
+          pg.fillStyle(0x333333, 0.6);
+          pg.fillRect(bf.x - 0.5, bf.y - 1, 1, 3);
+          pg.fillStyle(0xffaacc, 0.5 + wingOpen * 0.2);
+          pg.fillEllipse(bf.x - wingW, bf.y, wingW, 2);
+          pg.fillEllipse(bf.x + wingW, bf.y, wingW, 2);
+          pg.fillStyle(0xff88aa, 0.4);
+          pg.fillCircle(bf.x - wingW * 0.6, bf.y, 0.8);
+          pg.fillCircle(bf.x + wingW * 0.6, bf.y, 0.8);
         }
       },
     });
@@ -1238,14 +1164,9 @@ export class MainScene extends Phaser.Scene {
   private setupInput(): void {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const { x, y } = pointer;
-
-      // Ignore clicks on UI bar
       if (y < 42) return;
-
-      // Clear previous tooltips
       this.tooltipContainer.removeAll(true);
 
-      // Check buildings
       let clicked: IsoBuilding | null = null;
       for (const b of this.buildings) {
         if (this.isPointInBuilding(x, y, b)) {
@@ -1263,29 +1184,20 @@ export class MainScene extends Phaser.Scene {
   }
 
   private isPointInBuilding(px: number, py: number, b: IsoBuilding): boolean {
-    // Check if point is within the building's isometric footprint (approximate)
     const tl = this.toScreen(b.gridX, b.gridY);
     const tr = this.toScreen(b.gridX + b.tilesW, b.gridY);
     const br = this.toScreen(b.gridX + b.tilesW, b.gridY + b.tilesH);
     const bl = this.toScreen(b.gridX, b.gridY + b.tilesH);
-
-    // Extend upward for wall height
     const minY = Math.min(tl.y, tr.y) - b.wallHeight;
     const maxY = Math.max(bl.y, br.y);
     const minX = Math.min(tl.x, bl.x) - 5;
     const maxX = Math.max(tr.x, br.x) + 5;
-
     return px >= minX && px <= maxX && py >= minY && py <= maxY;
   }
 
   private showBuildingTooltip(b: IsoBuilding): void {
-    const center = this.toScreen(
-      b.gridX + b.tilesW / 2,
-      b.gridY + b.tilesH / 2
-    );
+    const center = this.toScreen(b.gridX + b.tilesW / 2, b.gridY + b.tilesH / 2);
     const tooltipY = center.y - b.wallHeight - 20;
-
-    // Tooltip background
     const bg = this.make.graphics({ x: 0, y: 0 }, false);
     const textContent = `${b.nameKR} (${b.name})`;
     const textWidth = textContent.length * 6 + 16;
@@ -1294,15 +1206,8 @@ export class MainScene extends Phaser.Scene {
     bg.fillRoundedRect(center.x - textWidth / 2, tooltipY - 10, textWidth, 20, 4);
     bg.lineStyle(1, 0xd4b898, 1);
     bg.strokeRoundedRect(center.x - textWidth / 2, tooltipY - 10, textWidth, 20, 4);
-
-    // Small triangle pointer
     bg.fillStyle(0xfef9f0, 0.95);
-    bg.fillTriangle(
-      center.x - 4, tooltipY + 10,
-      center.x + 4, tooltipY + 10,
-      center.x, tooltipY + 15
-    );
-
+    bg.fillTriangle(center.x - 4, tooltipY + 10, center.x + 4, tooltipY + 10, center.x, tooltipY + 15);
     bg.setDepth(51);
     this.tooltipContainer.add(bg);
 
@@ -1314,7 +1219,6 @@ export class MainScene extends Phaser.Scene {
     }).setOrigin(0.5, 0.5).setDepth(52);
     this.tooltipContainer.add(text);
 
-    // Auto-hide after 2.5s
     this.time.delayedCall(2500, () => {
       this.tooltipContainer.removeAll(true);
     });
@@ -1322,24 +1226,15 @@ export class MainScene extends Phaser.Scene {
 
   private showPlacementHint(x: number, y: number): void {
     const { gx, gy } = this.toGrid(x, y);
-
-    // Only show within grid bounds
     if (gx < 0 || gx >= this.GRID_SIZE || gy < 0 || gy >= this.GRID_SIZE) return;
 
-    // Check if a building already occupies this tile
     for (const b of this.buildings) {
-      if (
-        gx >= b.gridX && gx < b.gridX + b.tilesW &&
-        gy >= b.gridY && gy < b.gridY + b.tilesH
-      ) {
-        return;
-      }
+      if (gx >= b.gridX && gx < b.gridX + b.tilesW && gy >= b.gridY && gy < b.gridY + b.tilesH) return;
     }
 
     const { x: sx, y: sy } = this.toScreen(gx, gy);
     const centerY = sy + this.TILE_H / 2;
 
-    // Highlight tile
     const highlight = this.make.graphics({ x: 0, y: 0 }, false);
     highlight.fillStyle(0x4caf50, 0.2);
     highlight.beginPath();
@@ -1349,10 +1244,17 @@ export class MainScene extends Phaser.Scene {
     highlight.lineTo(sx - this.TILE_W / 2, sy + this.TILE_H / 2);
     highlight.closePath();
     highlight.fillPath();
+    highlight.lineStyle(1, 0x4caf50, 0.4);
+    highlight.beginPath();
+    highlight.moveTo(sx, sy);
+    highlight.lineTo(sx + this.TILE_W / 2, sy + this.TILE_H / 2);
+    highlight.lineTo(sx, sy + this.TILE_H);
+    highlight.lineTo(sx - this.TILE_W / 2, sy + this.TILE_H / 2);
+    highlight.closePath();
+    highlight.strokePath();
     highlight.setDepth(50);
     this.tooltipContainer.add(highlight);
 
-    // Plus icon
     const plus = this.add.text(sx, centerY - 4, '+', {
       fontSize: '16px',
       color: '#4caf50',
@@ -1361,7 +1263,6 @@ export class MainScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(51);
     this.tooltipContainer.add(plus);
 
-    // Animate and remove
     this.tweens.add({
       targets: plus,
       y: centerY - 20,
@@ -1374,10 +1275,10 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  // ─── Update loop ──────────────────────────────────────────────
   update(): void {
-    // Depth-sort characters each frame
-    for (const ch of this.characters) {
-      ch.gfx.setDepth(this.isoDepth(ch.gridX, ch.gridY) + 8);
-    }
+    // Character depth sorting is handled in tweens
+    // Walk animation is handled by Phaser's animation system
+    // No per-frame redraw needed — sprites handle everything
   }
 }
