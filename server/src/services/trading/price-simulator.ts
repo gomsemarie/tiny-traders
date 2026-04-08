@@ -1,4 +1,6 @@
 import { getSqlite } from '../../db/index';
+import { checkPendingOrders } from './order-engine';
+import { updateYahooQuoteCache, getYahooAssets } from './yahoo-price-service';
 
 interface PriceState {
   symbol: string;
@@ -26,9 +28,11 @@ interface CandleRow {
 // In-memory price state for all assets
 const priceState = new Map<string, PriceState>();
 let simulatorInterval: NodeJS.Timeout | null = null;
+let drizzleDb: any = null;
 
 /** Initialize base prices and start the simulation loop */
 export function initPriceSimulator(_db: any): void {
+  drizzleDb = _db;
   const sqlite = getSqlite();
   if (!sqlite) {
     console.error('[Price Simulator] No SQLite instance available');
@@ -59,8 +63,9 @@ export function initPriceSimulator(_db: any): void {
 
   // Initialize base prices for each asset
   for (const asset of assets) {
-    const volatility = getVolatilityForType(asset.type);
-    const basePrice = getBasePriceForType(asset.type);
+    const isVirtual = asset.data_source === 'virtual' || !asset.data_source;
+    const volatility = isVirtual ? (asset.volatility || getVolatilityForType(asset.type)) : 0.02;
+    const basePrice = isVirtual ? (asset.initial_price || getBasePriceForType(asset.type)) : 100;
     const now = Date.now();
 
     priceState.set(asset.symbol, {
@@ -75,11 +80,13 @@ export function initPriceSimulator(_db: any): void {
       timestamp: now,
     });
 
-    // Initialize quote cache
-    upsertQuote.run(
-      asset.symbol, basePrice, basePrice, basePrice * 1.02, basePrice * 0.98,
-      0, 0, Math.floor(now / 1000)
-    );
+    // Initialize quote cache (skip yahoo assets - they'll be fetched separately)
+    if (isVirtual) {
+      upsertQuote.run(
+        asset.symbol, basePrice, basePrice, basePrice * 1.02, basePrice * 0.98,
+        0, 0, Math.floor(now / 1000)
+      );
+    }
   }
 
   console.log(`[Price Simulator] Initialized ${priceState.size} assets with base prices`);
@@ -88,8 +95,18 @@ export function initPriceSimulator(_db: any): void {
   if (simulatorInterval) clearInterval(simulatorInterval);
 
   simulatorInterval = setInterval(() => {
-    updatePrices();
+    updatePrices().catch((error) => {
+      console.error('[Price Simulator] Error in update cycle:', error);
+    });
   }, 3000);
+
+  // Also start yahoo price fetching in background
+  const yahooAssets = getYahooAssets(sqlite);
+  if (yahooAssets.length > 0) {
+    updateYahooQuoteCache(drizzleDb, yahooAssets).catch((error) => {
+      console.error('[Price Simulator] Error updating yahoo quotes:', error);
+    });
+  }
 
   console.log('[Price Simulator] Loop started (tick every 3s)');
 }
@@ -152,8 +169,8 @@ export function getPriceHistory(
 
 // ============= Private helpers =============
 
-/** Generate geometric Brownian motion with mean reversion */
-function updatePrices(): void {
+/** Generate geometric Brownian motion with mean reversion (for virtual assets only) */
+async function updatePrices(): Promise<void> {
   const sqlite = getSqlite();
   if (!sqlite) return;
 
@@ -175,7 +192,14 @@ function updatePrices(): void {
        updated_at = excluded.updated_at`
   );
 
+  // Get yahoo symbols to skip them in simulation
+  const yahooSymbols = new Set(getYahooAssets(sqlite));
+
   for (const [symbol, state] of priceState) {
+    // Skip yahoo assets - they're updated separately
+    if (yahooSymbols.has(symbol)) {
+      continue;
+    }
     // Generate random walk using geometric Brownian motion
     const randomReturn = (Math.random() - 0.5) * state.volatility;
     const drift = -0.0001; // Slight mean reversion
@@ -246,6 +270,18 @@ function updatePrices(): void {
       insertMany(candlesToInsert);
     } catch (error) {
       console.error('[Price Simulator] Error inserting candles:', error);
+    }
+  }
+
+  // Check and execute pending orders on price tick
+  if (drizzleDb) {
+    try {
+      const executedCount = await checkPendingOrders(drizzleDb);
+      if (executedCount > 0) {
+        console.log(`[Price Simulator] Executed ${executedCount} pending orders`);
+      }
+    } catch (error) {
+      console.error('[Price Simulator] Error checking pending orders:', error);
     }
   }
 }

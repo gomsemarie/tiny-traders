@@ -6,7 +6,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { userGrids, placementZones, facilities, houses } from '../../db/schema';
+import { userGrids, placementZones, facilities, houses, facilityTemplates, walkways } from '../../db/schema';
 
 // ─── Grid Types ───
 
@@ -38,8 +38,8 @@ export interface PathResult {
 export async function initUserGrid(
   db: any,
   userId: string,
-  width: number = 8,
-  height: number = 8,
+  gridWidth: number = 8,
+  gridHeight: number = 8,
 ): Promise<void> {
   const [existing] = await db
     .select()
@@ -51,9 +51,8 @@ export async function initUserGrid(
 
   await db.insert(userGrids).values({
     userId,
-    width,
-    height,
-    pathTilesJson: [],
+    gridWidth,
+    gridHeight,
   });
 }
 
@@ -71,13 +70,20 @@ export async function getUserGrid(db: any, userId: string): Promise<GridState> {
     return { width: 8, height: 8, cells: createEmptyGrid(8, 8), pathTiles: [] };
   }
 
-  const cells = await buildGridCells(db, userId, grid.width, grid.height, grid.pathTilesJson ?? []);
+  // 보도 타일 조회
+  const pathTilesData = await db
+    .select()
+    .from(walkways)
+    .where(eq(walkways.userId, userId));
+  const pathTiles: Array<[number, number]> = pathTilesData.map((w: any) => [w.x, w.y] as [number, number]);
+
+  const cells = await buildGridCells(db, userId, grid.gridWidth, grid.gridHeight, pathTiles);
   return {
-    width: grid.width,
-    height: grid.height,
+    width: grid.gridWidth,
+    height: grid.gridHeight,
     cells,
-    pathTiles: grid.pathTilesJson ?? [],
-  };
+    pathTiles,
+  } as GridState;
 }
 
 /**
@@ -97,7 +103,7 @@ export async function expandGrid(
 
   if (!grid) return { success: false, error: 'Grid not found' };
 
-  if (newWidth < grid.width || newHeight < grid.height) {
+  if (newWidth < grid.gridWidth || newHeight < grid.gridHeight) {
     return { success: false, error: 'Cannot shrink grid' };
   }
 
@@ -107,7 +113,7 @@ export async function expandGrid(
 
   await db
     .update(userGrids)
-    .set({ width: newWidth, height: newHeight })
+    .set({ gridWidth: newWidth, gridHeight: newHeight })
     .where(eq(userGrids.userId, userId));
 
   return { success: true };
@@ -131,26 +137,43 @@ export async function addPathTile(
     .limit(1);
 
   if (!grid) return { success: false, error: 'Grid not found' };
-  if (x < 0 || x >= grid.width || y < 0 || y >= grid.height) {
+  if (x < 0 || x >= grid.gridWidth || y < 0 || y >= grid.gridHeight) {
     return { success: false, error: 'Out of bounds' };
   }
 
-  const pathTiles: number[][] = grid.pathTilesJson ?? [];
-  if (pathTiles.some(([px, py]) => px === x && py === y)) {
+  // Check if walkway already exists at this location
+  const [existing] = await db
+    .select()
+    .from(walkways)
+    .where(eq(walkways.userId, userId))
+    .where(eq(walkways.x, x))
+    .where(eq(walkways.y, y))
+    .limit(1);
+
+  if (existing) {
     return { success: false, error: 'Path already exists' };
   }
 
-  // 해당 위치에 다른 엔티티 있는지 확인
-  const occupied = await isCellOccupied(db, userId, x, y, grid.width, grid.height, pathTiles);
+  // Get path tiles to check occupation
+  const pathTilesData = await db
+    .select()
+    .from(walkways)
+    .where(eq(walkways.userId, userId));
+  const pathTiles: Array<[number, number]> = pathTilesData.map((w: any) => [w.x, w.y] as [number, number]);
+
+  // Check if cell is occupied
+  const occupied = await isCellOccupied(db, userId, x, y, grid.gridWidth, grid.gridHeight, pathTiles);
   if (occupied) {
     return { success: false, error: 'Cell is occupied' };
   }
 
-  pathTiles.push([x, y]);
-  await db
-    .update(userGrids)
-    .set({ pathTilesJson: pathTiles })
-    .where(eq(userGrids.userId, userId));
+  // Insert new walkway
+  await db.insert(walkways).values({
+    id: randomUUID(),
+    userId,
+    x,
+    y,
+  });
 
   return { success: true };
 }
@@ -164,22 +187,17 @@ export async function removePathTile(
   x: number,
   y: number,
 ): Promise<{ success: boolean }> {
-  const [grid] = await db
+  const [walkway] = await db
     .select()
-    .from(userGrids)
-    .where(eq(userGrids.userId, userId))
+    .from(walkways)
+    .where(eq(walkways.userId, userId))
+    .where(eq(walkways.x, x))
+    .where(eq(walkways.y, y))
     .limit(1);
 
-  if (!grid) return { success: false };
+  if (!walkway) return { success: false };
 
-  const pathTiles: number[][] = (grid.pathTilesJson ?? []).filter(
-    ([px, py]: number[]) => !(px === x && py === y),
-  );
-
-  await db
-    .update(userGrids)
-    .set({ pathTilesJson: pathTiles })
-    .where(eq(userGrids.userId, userId));
+  await db.delete(walkways).where(eq(walkways.id, walkway.id));
 
   return { success: true };
 }
@@ -266,7 +284,7 @@ export async function canPlaceFacility(
   userId: string,
   gridX: number,
   gridY: number,
-  shape: number[][],
+  shape: Array<[number, number]>,
   rotation: number = 0,
 ): Promise<{ valid: boolean; error?: string }> {
   const [grid] = await db
@@ -278,17 +296,23 @@ export async function canPlaceFacility(
   if (!grid) return { valid: false, error: 'Grid not found' };
 
   const rotated = rotateShape(shape, rotation);
-  const pathTiles: number[][] = grid.pathTilesJson ?? [];
+
+  // Get path tiles
+  const pathTilesData = await db
+    .select()
+    .from(walkways)
+    .where(eq(walkways.userId, userId));
+  const pathTiles: Array<[number, number]> = pathTilesData.map((w: any) => [w.x, w.y] as [number, number]);
 
   for (const [dx, dy] of rotated) {
     const x = gridX + dx;
     const y = gridY + dy;
 
-    if (x < 0 || x >= grid.width || y < 0 || y >= grid.height) {
+    if (x < 0 || x >= grid.gridWidth || y < 0 || y >= grid.gridHeight) {
       return { valid: false, error: `Cell (${x},${y}) is out of bounds` };
     }
 
-    const occupied = await isCellOccupied(db, userId, x, y, grid.width, grid.height, pathTiles);
+    const occupied = await isCellOccupied(db, userId, x, y, grid.gridWidth, grid.gridHeight, pathTiles);
     if (occupied) {
       return { valid: false, error: `Cell (${x},${y}) is occupied` };
     }
@@ -300,12 +324,12 @@ export async function canPlaceFacility(
 /**
  * 시설 모양 회전 (0, 90, 180, 270도)
  */
-export function rotateShape(shape: number[][], rotation: number): number[][] {
+export function rotateShape(shape: Array<[number, number]>, rotation: number): Array<[number, number]> {
   const steps = Math.round((rotation % 360) / 90);
-  let result = shape.map(([x, y]) => [x, y]);
+  let result: Array<[number, number]> = shape.map(([x, y]) => [x, y] as [number, number]);
 
   for (let i = 0; i < steps; i++) {
-    result = result.map(([x, y]) => [-y, x]); // 90도 시계방향
+    result = result.map(([x, y]) => [-y, x] as [number, number]); // 90도 시계방향
   }
 
   return result;
@@ -324,7 +348,7 @@ async function buildGridCells(
   userId: string,
   width: number,
   height: number,
-  pathTiles: number[][],
+  pathTiles: Array<[number, number]>,
 ): Promise<GridCell[][]> {
   const cells = createEmptyGrid(width, height);
 
@@ -384,7 +408,7 @@ async function isCellOccupied(
   y: number,
   _width: number,
   _height: number,
-  pathTiles: number[][],
+  pathTiles: Array<[number, number]>,
 ): Promise<boolean> {
   // 보도 체크
   if (pathTiles.some(([px, py]) => px === x && py === y)) return true;
@@ -441,12 +465,18 @@ export async function addPlacementZone(
 
   if (!grid) return { success: false, error: 'Grid not found' };
 
-  if (gridX < 0 || gridX >= grid.width || gridY < 0 || gridY >= grid.height) {
+  if (gridX < 0 || gridX >= grid.gridWidth || gridY < 0 || gridY >= grid.gridHeight) {
     return { success: false, error: 'Out of bounds' };
   }
 
-  const pathTiles: number[][] = grid.pathTilesJson ?? [];
-  const occupied = await isCellOccupied(db, userId, gridX, gridY, grid.width, grid.height, pathTiles);
+  // Get path tiles
+  const pathTilesData = await db
+    .select()
+    .from(walkways)
+    .where(eq(walkways.userId, userId));
+  const pathTiles: Array<[number, number]> = pathTilesData.map((w: any) => [w.x, w.y] as [number, number]);
+
+  const occupied = await isCellOccupied(db, userId, gridX, gridY, grid.gridWidth, grid.gridHeight, pathTiles);
   if (occupied) {
     return { success: false, error: 'Cell is occupied' };
   }

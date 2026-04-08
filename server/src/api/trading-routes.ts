@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { eq, and } from 'drizzle-orm';
 import { getQuote, getAllQuotes, updateQuoteCache } from '../services/trading/quote-service';
 import { placeOrder, executeMarketOrder, checkPendingOrders, cancelOrder } from '../services/trading/order-engine';
 import { getPortfolio, getRealizedPnl, getAssetAllocation, getTradeHistory } from '../services/trading/portfolio-service';
@@ -6,6 +7,7 @@ import { evaluateAutoTrade } from '../services/trading/auto-trade-service';
 import { executeDisruptionTrade } from '../services/trading/disruption-trade-service';
 import { openSavingsAccount, matureSavingsAccounts, cancelSavingsAccount, getUserSavings } from '../services/bank/bank-service';
 import { getPriceHistory } from '../services/trading/price-simulator';
+import { orders } from '../db/schema';
 
 export async function tradingRoutes(fastify: FastifyInstance) {
   // Quote endpoints
@@ -84,6 +86,22 @@ export async function tradingRoutes(fastify: FastifyInstance) {
     const executedCount = await checkPendingOrders(db);
     return { executedCount };
   });
+
+  fastify.get<{ Params: { userId: string } }>(
+    '/api/orders/pending/:userId',
+    async (request, reply) => {
+      const db = (fastify as any).db;
+      try {
+        const pendingOrders = await db
+          .select()
+          .from(orders)
+          .where(and(eq(orders.userId, request.params.userId), eq(orders.status, 'pending')));
+        return { orders: pendingOrders };
+      } catch (error) {
+        return reply.code(400).send({ error: String(error) });
+      }
+    },
+  );
 
   // Portfolio endpoints
   fastify.get<{ Params: { userId: string } }>(

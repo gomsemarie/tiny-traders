@@ -5,6 +5,7 @@ import { setupRoutes } from './api/routes';
 import { setupWebSocket } from './websocket';
 import { initDatabase } from './db';
 import { initPriceSimulator } from './services/trading/price-simulator';
+import { initEventScheduler } from './services/event/event-service';
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -45,6 +46,10 @@ async function main() {
   });
   setupWebSocket(io);
   fastify.decorate('io', io);
+
+  // Event Scheduler (10 minutes for testing, change to 30 minutes in production)
+  const eventIntervalMs = process.env.NODE_ENV === 'production' ? 30 * 60 * 1000 : 10 * 60 * 1000;
+  initEventScheduler(io, eventIntervalMs);
 
   // Start
   await fastify.listen({ port: PORT, host: HOST });

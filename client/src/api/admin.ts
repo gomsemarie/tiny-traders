@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from './queryKeys';
+import { queryKeys } from './query-keys';
 
 const API_BASE = '/api/admin';
 

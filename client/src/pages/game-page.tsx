@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 import Phaser from 'phaser';
-import { MainScene } from '../scenes/MainScene';
-import { useAuthStore } from '../stores/authStore';
+import { MainScene } from '../scenes/main-scene';
+import { useAuthStore } from '../stores/auth-store';
 
 const GAME_CONFIG: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,

@@ -1,8 +1,8 @@
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom';
-import AdminTableEditor from '../modules/admin/AdminTableEditor';
-import UserManagement from '../modules/admin/UserManagement';
+import AdminTableEditor from '../modules/admin/admin-table-editor';
+import UserManagement from '../modules/admin/user-management';
 import { TABLE_COLUMNS, TABLE_PK } from '../modules/admin/columns';
-import { useAuthStore } from '../stores/authStore';
+import { useAuthStore } from '../stores/auth-store';
 
 const NAV_ITEMS = [
   { path: '/admin/characters', label: '캐릭터 관리', icon: '👤', table: 'character_templates' },

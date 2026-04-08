@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import { createChart, ColorType, type IChartApi, type ISeriesApi } from 'lightweight-charts';
-import { useAuthStore } from '../../stores/authStore';
-import { useQuotes, useQuote, usePriceHistory, usePortfolio, usePlaceOrder, useTradeHistory, type Quote, type PriceCandle } from '../../api/trading';
+import { useAuthStore } from '../../stores/auth-store';
+import { useQuotes, useQuote, usePriceHistory, usePortfolio, usePlaceOrder, useTradeHistory, usePendingOrders, useCancelOrder, type Quote, type PriceCandle, type PendingOrder } from '../../api/trading';
 import { getSocket, connectSocket } from '../../lib/socket';
 
 // ═══════════════════════════════════════════════
@@ -543,12 +543,29 @@ const PriceChart = memo(({
   return (
     <div style={{
       flex: 1,
-      minHeight: 0,
+      minHeight: 100,
       overflow: 'hidden',
       position: 'relative' as const,
       background: COLORS.bg,
     }}>
-      <div ref={chartContainer} style={{ width: '100%', height: '100%' }} />
+      <div ref={chartContainer} style={{
+        position: 'absolute' as const,
+        inset: 0,
+      }} />
+      {isLoading && (
+        <div style={{
+          position: 'absolute' as const,
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: COLORS.textSecondary,
+          fontSize: COMPACT.valueFontSize,
+          pointerEvents: 'none' as const,
+        }}>
+          차트 로딩 중...
+        </div>
+      )}
     </div>
   );
 });
@@ -962,7 +979,7 @@ const BottomPanel = memo(({
       {/* Tab Content */}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {activeTab === 'positions' && <PositionsTab userId={userId} refreshTrigger={refreshTrigger} />}
-        {activeTab === 'pending' && <PendingOrdersTab />}
+        {activeTab === 'pending' && <PendingOrdersTab userId={userId} />}
         {activeTab === 'history' && <TradeHistoryTab userId={userId} />}
         {activeTab === 'allocation' && <AllocationTab userId={userId} />}
       </div>
@@ -1048,15 +1065,116 @@ PositionsTab.displayName = 'PositionsTab';
 // ═══════════════════════════════════════════════
 // Pending Orders Tab
 // ═══════════════════════════════════════════════
-const PendingOrdersTab = memo(() => {
+const PendingOrdersTab = memo(({ userId }: { userId: string }) => {
+  const { data: pendingData } = usePendingOrders(userId);
+  const { mutate: cancelOrder, isPending: isCancelling } = useCancelOrder();
+  const pendingOrders = pendingData?.orders ?? [];
+
+  const getOrderTypeLabel = (type: string): string => {
+    switch (type) {
+      case 'limit': return '지정가';
+      case 'stop_loss': return '손절';
+      case 'take_profit': return '익절';
+      case 'market': return '시장가';
+      default: return type;
+    }
+  };
+
+  const getSideLabel = (side: string): string => {
+    return side === 'buy' ? '매수' : '매도';
+  };
+
+  if (pendingOrders.length === 0) {
+    return (
+      <div style={{
+        padding: 8,
+        color: COLORS.textSecondary,
+        fontSize: COMPACT.labelFontSize,
+        textAlign: 'center' as const,
+      }}>
+        미체결 주문 없음
+      </div>
+    );
+  }
+
   return (
-    <div style={{
-      padding: 8,
-      color: COLORS.textSecondary,
-      fontSize: COMPACT.labelFontSize,
-      textAlign: 'center' as const,
-    }}>
-      미체결 주문 없음
+    <div style={{ display: 'flex', flexDirection: 'column' as const, height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr 1fr 1.2fr 0.8fr',
+        padding: COMPACT.cellPad,
+        borderBottom: `1px solid ${COLORS.border}`,
+        fontSize: COMPACT.labelFontSize,
+        fontWeight: 600,
+        backgroundColor: COLORS.bgAlt,
+        gap: 4,
+        flexShrink: 0,
+      }}>
+        <div>종목</div>
+        <div>매매</div>
+        <div>유형</div>
+        <div>수량</div>
+        <div>주문가</div>
+        <div></div>
+      </div>
+
+      {/* Rows */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {pendingOrders.map((order, idx) => (
+          <div
+            key={order.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr 1fr 1.2fr 0.8fr',
+              padding: COMPACT.cellPad,
+              height: COMPACT.tableRowH,
+              borderBottom: `1px solid ${COLORS.border}`,
+              backgroundColor: idx % 2 === 0 ? COLORS.bg : COLORS.bgAlt,
+              alignItems: 'center',
+              fontSize: COMPACT.valueFontSize,
+              gap: 4,
+            }}
+          >
+            <div style={{ fontWeight: 600, color: COLORS.text }}>
+              {order.symbol}
+            </div>
+            <div style={{ color: order.side === 'buy' ? COLORS.up : COLORS.down }}>
+              {getSideLabel(order.side)}
+            </div>
+            <div style={{ color: COLORS.textSecondary }}>
+              {getOrderTypeLabel(order.type)}
+            </div>
+            <div style={{ color: COLORS.text }}>
+              {order.quantity.toFixed(0)}
+            </div>
+            <div style={{ color: COLORS.text, fontWeight: 500 }}>
+              {order.type === 'limit' && order.limitPrice
+                ? order.limitPrice.toFixed(0)
+                : order.type === 'stop_loss' || order.type === 'take_profit'
+                ? order.stopPrice?.toFixed(0)
+                : '—'}
+            </div>
+            <button
+              onClick={() => cancelOrder(order.id)}
+              disabled={isCancelling}
+              style={{
+                padding: '2px 4px',
+                border: `1px solid ${COLORS.down}`,
+                background: 'transparent',
+                color: COLORS.down,
+                borderRadius: 2,
+                fontSize: COMPACT.labelFontSize,
+                cursor: isCancelling ? 'default' : 'pointer',
+                fontWeight: 600,
+                opacity: isCancelling ? 0.6 : 1,
+              }}
+            >
+              취소
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 });

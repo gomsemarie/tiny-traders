@@ -5,7 +5,7 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react';
 import { MemoryRouter } from 'react-router-dom';
-import AdminPage from '../pages/AdminPage';
+import AdminPage from '../pages/admin-page';
 
 describe('AdminPage', () => {
   it('renders admin editor title', () => {

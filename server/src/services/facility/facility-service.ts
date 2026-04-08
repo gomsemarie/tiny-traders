@@ -10,24 +10,24 @@ import { facilityTemplates, facilities } from '../../db/schema';
 import { canPlaceFacility, rotateShape } from './grid-service';
 
 export type FacilityType =
-  | 'kitchen' | 'parking' | 'office' | 'warehouse'
+  | 'character_zone' | 'house' | 'kitchen' | 'parking' | 'office' | 'warehouse'
   | 'work_boost' | 'craft_boost' | 'train_boost'
-  | 'rest' | 'bank' | 'hospital';
+  | 'rest' | 'bank' | 'hospital' | 'walkway';
 
 export interface FacilityInfo {
   id: string;
-  templateId: string;
+  definitionId: string;
   name: string;
   type: FacilityType;
-  level: number;
-  maxLevel: number;
+  grade: number;
+  maxGrade: number;
   gridX: number;
   gridY: number;
   rotation: number;
-  isBuilding: boolean;
-  buildCompleteAt: Date | null;
-  shape: number[][];
+  status: 'active' | 'building' | 'damaged';
+  shape: Array<[number, number]>;
   effects: Record<string, unknown>;
+  isCollateral: boolean;
 }
 
 /**
@@ -36,7 +36,7 @@ export interface FacilityInfo {
 export async function buildFacility(
   db: any,
   userId: string,
-  templateId: string,
+  definitionId: string,
   gridX: number,
   gridY: number,
   rotation: number = 0,
@@ -45,13 +45,13 @@ export async function buildFacility(
   const [template] = await db
     .select()
     .from(facilityTemplates)
-    .where(eq(facilityTemplates.id, templateId))
+    .where(eq(facilityTemplates.id, definitionId))
     .limit(1);
 
   if (!template) return { success: false, error: 'Template not found' };
 
   // 배치 유효성 검증
-  const shape = template.shapeJson as number[][];
+  const shape = template.shapeJson as Array<[number, number]>;
   const validation = await canPlaceFacility(db, userId, gridX, gridY, shape, rotation);
   if (!validation.valid) {
     return { success: false, error: validation.error };
@@ -59,19 +59,19 @@ export async function buildFacility(
 
   const id = randomUUID();
   const now = new Date();
-  const buildCompleteAt = new Date(now.getTime() + template.buildTime * 1000);
+  const status = template.buildTime > 0 ? 'building' : 'active';
 
   await db.insert(facilities).values({
     id,
     ownerId: userId,
-    templateId,
-    level: 1,
+    definitionId,
+    grade: 1,
     gridX,
     gridY,
     rotation,
-    isBuilding: true,
-    buildCompleteAt,
+    status,
     createdAt: now,
+    isCollateral: false,
   });
 
   return { success: true, id };
@@ -90,17 +90,15 @@ export async function checkBuildCompletion(
     .where(eq(facilities.id, facilityId))
     .limit(1);
 
-  if (!facility || !facility.isBuilding) return { completed: false };
+  if (!facility || facility.status !== 'building') return { completed: false };
 
-  if (facility.buildCompleteAt && new Date() >= facility.buildCompleteAt) {
-    await db
-      .update(facilities)
-      .set({ isBuilding: false })
-      .where(eq(facilities.id, facilityId));
-    return { completed: true };
-  }
+  // For now, building is instant (buildTime = 0), so just mark as active
+  await db
+    .update(facilities)
+    .set({ status: 'active' })
+    .where(eq(facilities.id, facilityId));
 
-  return { completed: false };
+  return { completed: true };
 }
 
 /**
@@ -109,7 +107,7 @@ export async function checkBuildCompletion(
 export async function upgradeFacility(
   db: any,
   facilityId: string,
-): Promise<{ success: boolean; newLevel?: number; error?: string }> {
+): Promise<{ success: boolean; newGrade?: number; error?: string }> {
   const [facility] = await db
     .select()
     .from(facilities)
@@ -117,35 +115,32 @@ export async function upgradeFacility(
     .limit(1);
 
   if (!facility) return { success: false, error: 'Facility not found' };
-  if (facility.isBuilding) return { success: false, error: 'Still building' };
+  if (facility.status === 'building') return { success: false, error: 'Still building' };
 
   const [template] = await db
     .select()
     .from(facilityTemplates)
-    .where(eq(facilityTemplates.id, facility.templateId))
+    .where(eq(facilityTemplates.id, facility.definitionId))
     .limit(1);
 
   if (!template) return { success: false, error: 'Template not found' };
 
-  if (facility.level >= template.maxLevel) {
-    return { success: false, error: 'Max level reached' };
+  if (facility.grade >= template.maxLevel) {
+    return { success: false, error: 'Max grade reached' };
   }
 
-  const newLevel = facility.level + 1;
-  // 업그레이드 시 건설 시간 (레벨 × 기본 시간)
-  const upgradeBuildTime = template.buildTime * newLevel;
-  const buildCompleteAt = new Date(Date.now() + upgradeBuildTime * 1000);
+  const newGrade = facility.grade + 1;
+  const newStatus = template.buildTime > 0 ? 'building' : 'active';
 
   await db
     .update(facilities)
     .set({
-      level: newLevel,
-      isBuilding: true,
-      buildCompleteAt,
+      grade: newGrade,
+      status: newStatus,
     })
     .where(eq(facilities.id, facilityId));
 
-  return { success: true, newLevel };
+  return { success: true, newGrade };
 }
 
 /**
@@ -184,23 +179,25 @@ export async function moveFacility(
     .limit(1);
 
   if (!facility) return { success: false, error: 'Facility not found' };
-  if (facility.isBuilding) return { success: false, error: 'Cannot move while building' };
+  if (facility.status === 'building') return { success: false, error: 'Cannot move while building' };
 
   const [template] = await db
     .select()
     .from(facilityTemplates)
-    .where(eq(facilityTemplates.id, facility.templateId))
+    .where(eq(facilityTemplates.id, facility.definitionId))
     .limit(1);
 
   if (!template) return { success: false, error: 'Template not found' };
 
-  // 현재 시설을 임시로 제거한 상태에서 검증해야 함
-  // 간단하게: 새 위치 유효성 확인 (자기 자신 위치는 제외해야 하지만 단순화)
-  const shape = template.shapeJson as number[][];
+  const shape = template.shapeJson as Array<[number, number]>;
   const rotation = newRotation ?? facility.rotation;
 
-  // TODO: 더 정교한 검증 (자신 점유 셀 제외)
-  // 현재는 단순히 위치 변경만 처리
+  // Validate placement at new location
+  const validation = await canPlaceFacility(db, facility.ownerId, newGridX, newGridY, shape, rotation);
+  if (!validation.valid) {
+    return { success: false, error: validation.error };
+  }
+
   await db
     .update(facilities)
     .set({
@@ -231,25 +228,25 @@ export async function getUserFacilities(
     const [template] = await db
       .select()
       .from(facilityTemplates)
-      .where(eq(facilityTemplates.id, f.templateId))
+      .where(eq(facilityTemplates.id, f.definitionId))
       .limit(1);
 
     if (!template) continue;
 
     result.push({
       id: f.id,
-      templateId: f.templateId,
+      definitionId: f.definitionId,
       name: template.name,
       type: template.type as FacilityType,
-      level: f.level,
-      maxLevel: template.maxLevel,
+      grade: f.grade,
+      maxGrade: template.maxLevel,
       gridX: f.gridX,
       gridY: f.gridY,
       rotation: f.rotation,
-      isBuilding: f.isBuilding,
-      buildCompleteAt: f.buildCompleteAt,
-      shape: template.shapeJson as number[][],
+      status: f.status as 'active' | 'building' | 'damaged',
+      shape: template.shapeJson as Array<[number, number]>,
       effects: template.effectsJson as Record<string, unknown>,
+      isCollateral: f.isCollateral,
     });
   }
 
@@ -273,11 +270,11 @@ export async function getFacilityLevelByType(
     const [template] = await db
       .select()
       .from(facilityTemplates)
-      .where(eq(facilityTemplates.id, f.templateId))
+      .where(eq(facilityTemplates.id, f.definitionId))
       .limit(1);
 
-    if (template && template.type === type && !f.isBuilding) {
-      return f.level;
+    if (template && template.type === type && f.status === 'active') {
+      return f.grade;
     }
   }
 

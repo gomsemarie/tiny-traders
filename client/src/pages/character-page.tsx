@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useCharacters } from '../api/characters';
-import CharacterCard from '../modules/character/CharacterCard';
-import CharacterDetailPanel from '../modules/character/CharacterDetailPanel';
-import GachaPanel from '../modules/character/GachaPanel';
+import CharacterCard from '../modules/character/character-card';
+import CharacterDetailPanel from '../modules/character/character-detail-panel';
+import GachaPanel from '../modules/character/gacha-panel';
 
 // TODO: Replace with actual auth user ID
 const TEMP_USER_ID = 'user-1';

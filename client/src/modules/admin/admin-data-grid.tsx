@@ -117,21 +117,42 @@ export default function AdminDataGrid({
     [columns, onCellEdited],
   );
 
+  const gridTheme = {
+    baseFontStyle: '12px Inter, system-ui',
+    headerFontStyle: '600 11px Inter, system-ui',
+    editorFontSize: '12px',
+    cellHorizontalPadding: 8,
+    cellVerticalPadding: 4,
+    lineHeight: 20,
+    headerHeight: 30,
+    roundingRadius: 0,
+    bgHeader: '#f8fafc',
+    bgCell: '#fff',
+    textHeader: '#374151',
+    textDark: '#111827',
+    borderColor: '#e5e7eb',
+    bgHeaderHovered: '#f1f5f9',
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      <DataEditor
-        columns={gridColumns}
-        rows={filteredRows.length}
-        getCellContent={getContent}
-        onCellEdited={onCellEditedHandler}
-        smoothScrollX
-        smoothScrollY
-        rowMarkers="clickable-number"
-        getCellsForSelection={true}
-        keybindings={{ search: true }}
-        width="100%"
-        height="100%"
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', padding: 8 }}>
+      <div style={{ position: 'absolute', inset: 8 }}>
+        <DataEditor
+          columns={gridColumns}
+          rows={filteredRows.length}
+          getCellContent={getContent}
+          onCellEdited={onCellEditedHandler}
+          smoothScrollX
+          smoothScrollY
+          rowMarkers="clickable-number"
+          getCellsForSelection={true}
+          keybindings={{ search: true }}
+          theme={gridTheme}
+          rowHeight={28}
+          width="100%"
+          height="100%"
+        />
+      </div>
     </div>
   );
 }

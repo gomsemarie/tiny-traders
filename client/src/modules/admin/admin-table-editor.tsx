@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import DataEditor, {
   type GridColumn,
   type GridCell,
-  type EditableGridCell,
   GridCellKind,
   type Item,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
 import { useAdminTable, useAdminCreate, useAdminUpdate, useAdminDelete } from '../../api/admin';
-import { useUndoRedo } from './useUndoRedo';
-import type { ColumnDef } from './AdminDataGrid';
+import { useUndoRedo } from './use-undo-redo';
+import type { ColumnDef } from './admin-data-grid';
+import AdminEditModal from './admin-edit-modal';
 
 interface AdminTableEditorProps {
   title: string;
@@ -25,6 +25,9 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
   const deleteMutation = useAdminDelete(tableName);
   const { pushAction, undo, redo, canUndo, canRedo } = useUndoRedo();
   const [searchText, setSearchText] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateMode, setIsCreateMode] = useState(false);
+  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
 
   const rows = useMemo(() => {
     const allRows = data?.rows ?? [];
@@ -79,45 +82,22 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
     [columns, rows],
   );
 
-  const onCellEdited = useCallback(
-    ([col, row]: Item, newValue: EditableGridCell) => {
-      const colDef = columns[col];
+  const onCellActivated = useCallback(
+    ([_col, row]: Item) => {
       const rowData = rows[row];
-      if (!colDef || colDef.readonly || !rowData) return;
-
-      let value: unknown;
-      if (newValue.kind === GridCellKind.Number) value = newValue.data;
-      else if (newValue.kind === GridCellKind.Boolean) value = newValue.data;
-      else if (newValue.kind === GridCellKind.Text) value = newValue.data;
-
-      const pk = String(rowData[pkColumn]);
-
-      pushAction({
-        tableName,
-        type: 'update',
-        id: pk,
-        prevData: { [colDef.key]: rowData[colDef.key] },
-        nextData: { [colDef.key]: value },
-      });
-
-      updateMutation.mutate({ id: pk, data: { [colDef.key]: value } });
+      if (!rowData) return;
+      setEditingRow({ ...rowData });
+      setIsCreateMode(false);
+      setIsModalOpen(true);
     },
-    [columns, rows, pkColumn, updateMutation, tableName, pushAction],
+    [rows],
   );
 
   const handleAdd = useCallback(() => {
-    const newRow: Record<string, unknown> = {};
-    for (const col of columns) {
-      if (col.kind === GridCellKind.Number) newRow[col.key] = 0;
-      else if (col.kind === GridCellKind.Boolean) newRow[col.key] = false;
-      else newRow[col.key] = '';
-    }
-    newRow[pkColumn] = crypto.randomUUID();
-    if ('createdAt' in newRow || columns.some(c => c.key === 'createdAt')) {
-      newRow['createdAt'] = Date.now();
-    }
-    createMutation.mutate(newRow);
-  }, [columns, pkColumn, createMutation]);
+    setEditingRow(null);
+    setIsCreateMode(true);
+    setIsModalOpen(true);
+  }, []);
 
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
 
@@ -165,6 +145,47 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
     }
   }, [selectedRow, rows, pkColumn, deleteMutation]);
 
+  const handleModalSave = useCallback(
+    (rowData: Record<string, unknown>) => {
+      if (isCreateMode) {
+        // Create mode: assign ID and save
+        const newRow: Record<string, unknown> = { ...rowData };
+        newRow[pkColumn] = crypto.randomUUID();
+        if (!newRow['createdAt'] && columns.some((c) => c.key === 'createdAt')) {
+          newRow['createdAt'] = Date.now();
+        }
+        createMutation.mutate(newRow);
+      } else if (editingRow) {
+        // Edit mode: compute changed fields and update
+        const changedFields: Record<string, unknown> = {};
+        for (const col of columns) {
+          if (rowData[col.key] !== editingRow[col.key]) {
+            changedFields[col.key] = rowData[col.key];
+          }
+        }
+        if (Object.keys(changedFields).length > 0) {
+          const pk = String(editingRow[pkColumn]);
+          // prevData = old values, nextData = new values
+          const prevData: Record<string, unknown> = {};
+          for (const key of Object.keys(changedFields)) {
+            prevData[key] = editingRow[key];
+          }
+          pushAction({
+            tableName,
+            type: 'update',
+            id: pk,
+            prevData,
+            nextData: changedFields,
+          });
+          updateMutation.mutate({ id: pk, data: changedFields });
+        }
+      }
+      setIsModalOpen(false);
+      setEditingRow(null);
+    },
+    [isCreateMode, editingRow, columns, pkColumn, createMutation, updateMutation, tableName, pushAction],
+  );
+
   const isSaving = updateMutation.isPending || createMutation.isPending || deleteMutation.isPending;
 
   if (isLoading) {
@@ -183,6 +204,23 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
     );
   }
 
+  const gridTheme = {
+    baseFontStyle: '12px Inter, system-ui',
+    headerFontStyle: '600 11px Inter, system-ui',
+    editorFontSize: '12px',
+    cellHorizontalPadding: 8,
+    cellVerticalPadding: 4,
+    lineHeight: 20,
+    headerHeight: 30,
+    roundingRadius: 0,
+    bgHeader: '#f8fafc',
+    bgCell: '#fff',
+    textHeader: '#374151',
+    textDark: '#111827',
+    borderColor: '#e5e7eb',
+    bgHeaderHovered: '#f1f5f9',
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
@@ -190,14 +228,14 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '12px 20px',
+        padding: '8px 12px',
         borderBottom: '1px solid #e5e7eb',
         background: '#fff',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: 0 }}>{title}</h2>
+          <h2 style={{ fontSize: 13, fontWeight: 600, color: '#111827', margin: 0 }}>{title}</h2>
           <span style={{
-            fontSize: 11,
+            fontSize: 10,
             color: '#6b7280',
             background: '#f3f4f6',
             padding: '2px 7px',
@@ -206,7 +244,7 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
             {rows.length}
           </span>
           {isSaving && (
-            <span style={{ fontSize: 11, color: '#2563eb' }}>저장 중...</span>
+            <span style={{ fontSize: 10, color: '#2563eb' }}>저장 중...</span>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -216,17 +254,17 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             style={{
-              padding: '5px 10px',
-              fontSize: 12,
+              padding: '4px 8px',
+              fontSize: 11,
               border: '1px solid #e5e7eb',
-              borderRadius: 5,
+              borderRadius: 4,
               outline: 'none',
-              width: 160,
+              width: 140,
               background: '#fafafa',
               color: '#111827',
             }}
           />
-          <button onClick={handleAdd} disabled={createMutation.isPending} style={toolBtn}>
+          <button onClick={handleAdd} disabled={createMutation.isPending} style={{ ...toolBtn, padding: '4px 8px', fontSize: 11 }}>
             추가
           </button>
           <button
@@ -234,17 +272,19 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
             disabled={selectedRow === null || deleteMutation.isPending}
             style={{
               ...toolBtn,
+              padding: '4px 8px',
+              fontSize: 11,
               color: '#dc2626',
               opacity: (selectedRow === null || deleteMutation.isPending) ? 0.3 : 1,
             }}
           >
             삭제
           </button>
-          <div style={{ width: 1, height: 20, background: '#e5e7eb', margin: '0 2px' }} />
+          <div style={{ width: 1, height: 16, background: '#e5e7eb', margin: '0 2px' }} />
           <button
             onClick={() => undo(applyUndoRedo)}
             disabled={!canUndo}
-            style={{ ...toolBtn, opacity: canUndo ? 1 : 0.3 }}
+            style={{ ...toolBtn, padding: '4px 8px', fontSize: 11, opacity: canUndo ? 1 : 0.3 }}
             title="Ctrl+Z"
           >
             되돌리기
@@ -252,7 +292,7 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
           <button
             onClick={() => redo(applyUndoRedo)}
             disabled={!canRedo}
-            style={{ ...toolBtn, opacity: canRedo ? 1 : 0.3 }}
+            style={{ ...toolBtn, padding: '4px 8px', fontSize: 11, opacity: canRedo ? 1 : 0.3 }}
             title="Ctrl+Shift+Z"
           >
             다시실행
@@ -260,27 +300,44 @@ export default function AdminTableEditor({ title, tableName, columns, pkColumn }
         </div>
       </header>
 
-      {/* Grid */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-        <DataEditor
-          columns={gridColumns}
-          rows={rows.length}
-          getCellContent={getContent}
-          onCellEdited={onCellEdited}
-          onGridSelectionChange={(sel) => {
-            if (sel.current?.cell) {
-              setSelectedRow(sel.current.cell[1]);
-            }
-          }}
-          smoothScrollX
-          smoothScrollY
-          rowMarkers="clickable-number"
-          getCellsForSelection={true}
-          keybindings={{ search: true }}
-          width="100%"
-          height="100%"
-        />
+      {/* Grid — use absolute positioning to give DataEditor explicit dimensions */}
+      <div style={{ flex: 1, position: 'relative', minHeight: 0, padding: 8 }}>
+        <div style={{ position: 'absolute', inset: 8 }}>
+          <DataEditor
+            columns={gridColumns}
+            rows={rows.length}
+            getCellContent={getContent}
+            onCellActivated={onCellActivated}
+            onGridSelectionChange={(sel) => {
+              if (sel.current?.cell) {
+                setSelectedRow(sel.current.cell[1]);
+              }
+            }}
+            smoothScrollX
+            smoothScrollY
+            rowMarkers="clickable-number"
+            getCellsForSelection={true}
+            keybindings={{ search: true }}
+            theme={gridTheme}
+            rowHeight={28}
+            width="100%"
+            height="100%"
+          />
+        </div>
       </div>
+
+      {/* Edit Modal */}
+      <AdminEditModal
+        columns={columns}
+        row={editingRow}
+        isOpen={isModalOpen}
+        isCreateMode={isCreateMode}
+        onSave={handleModalSave}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingRow(null);
+        }}
+      />
     </div>
   );
 }

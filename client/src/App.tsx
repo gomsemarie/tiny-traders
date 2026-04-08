@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuthStore } from './stores/authStore';
-import DashboardPage from './pages/DashboardPage';
-import LoginPage from './pages/LoginPage';
+import { useAuthStore } from './stores/auth-store';
+import DashboardPage from './pages/dashboard-page';
+import LoginPage from './pages/login-page';
 
 /** 인증 필요한 라우트 가드 */
 function RequireAuth({ children }: { children: React.ReactNode }) {

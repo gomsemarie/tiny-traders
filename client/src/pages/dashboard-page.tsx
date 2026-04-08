@@ -1,16 +1,23 @@
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import Phaser from 'phaser';
-import { MainScene } from '../scenes/MainScene';
-import { useAuthStore } from '../stores/authStore';
+import { MainScene } from '../scenes/main-scene';
+import { useAuthStore } from '../stores/auth-store';
 import { useCharacters } from '../api/characters';
-import CharacterCard from '../modules/character/CharacterCard';
-import CharacterDetailPanel from '../modules/character/CharacterDetailPanel';
-import GachaPanel from '../modules/character/GachaPanel';
-import AdminTableEditor from '../modules/admin/AdminTableEditor';
-import UserManagement from '../modules/admin/UserManagement';
+import CharacterCard from '../modules/character/character-card';
+import CharacterDetailPanel from '../modules/character/character-detail-panel';
+import GachaPanel from '../modules/character/gacha-panel';
+import AdminTableEditor from '../modules/admin/admin-table-editor';
+import UserManagement from '../modules/admin/user-management';
 import { TABLE_COLUMNS, TABLE_PK } from '../modules/admin/columns';
-import TradingWindow from '../modules/trading/TradingWindow';
-import WindowFrame, { getSpawnOffset, type ScreenMode, type WindowDef } from '../components/WindowFrame';
+import TradingWindow from '../modules/trading/trading-window';
+import BankingWindow from '../modules/banking/banking-window';
+import RankingWindow from '../modules/ranking/ranking-window';
+import WindowFrame, { getSpawnOffset, type ScreenMode, type WindowDef } from '../components/window-frame';
+import EventBanner from '../modules/events/event-banner';
+import FacilityGridWindow from '../modules/facility/facility-grid-window';
+import MinigameWindow from '../modules/minigames/minigame-window';
+import ShopWindow from '../modules/shop/shop-window';
+import PixelEditor from '../modules/editor/pixel-editor';
 
 /* ─── Admin table nav ─── */
 const ADMIN_TABLES = [
@@ -28,15 +35,33 @@ const ADMIN_TABLES = [
 ];
 
 /* ─── Window definitions ─── */
-type WinId = 'game' | 'characters' | 'gacha' | 'trading' | 'admin-data' | 'admin-members';
+type WinId = 'game' | 'characters' | 'gacha' | 'trading' | 'banking' | 'ranking' | 'facility' | 'minigame' | 'shop' | 'editor' | 'admin-data' | 'admin-members';
 
 const WIN_DEFS: Record<WinId, WindowDef> = {
-  game:           { id: 'game',          title: '게임',       defaultWidth: 520, defaultHeight: 440, minWidth: 360, minHeight: 200 },
-  characters:     { id: 'characters',    title: '캐릭터',     defaultWidth: 640, defaultHeight: 480, minWidth: 400, minHeight: 200 },
-  gacha:          { id: 'gacha',         title: '뽑기',       defaultWidth: 400, defaultHeight: 460, minWidth: 320, minHeight: 200 },
-  trading:        { id: 'trading',       title: '투자',       defaultWidth: 900, defaultHeight: 600, minWidth: 700, minHeight: 400 },
-  'admin-data':   { id: 'admin-data',    title: '데이터 관리', defaultWidth: 800, defaultHeight: 520, minWidth: 500, minHeight: 200 },
-  'admin-members':{ id: 'admin-members', title: '회원 관리',   defaultWidth: 640, defaultHeight: 460, minWidth: 400, minHeight: 200 },
+  // game: canvas 480×360 + padding 12*2 + top info ~28 + titlebar 32 + border 2 ≈ 518×436
+  game:           { id: 'game',          title: '게임',       defaultWidth: 518, defaultHeight: 436, minWidth: 360, minHeight: 280 },
+  // characters: card grid + optional detail sidebar 260
+  characters:     { id: 'characters',    title: '캐릭터',     defaultWidth: 640, defaultHeight: 420, minWidth: 380, minHeight: 260 },
+  // gacha: banner list + roll button + result — compact
+  gacha:          { id: 'gacha',         title: '뽑기',       defaultWidth: 360, defaultHeight: 380, minWidth: 300, minHeight: 280 },
+  // trading: chart + orderbook + stocklist — needs width
+  trading:        { id: 'trading',       title: '투자',       defaultWidth: 880, defaultHeight: 560, minWidth: 680, minHeight: 380 },
+  // banking: product list + account table — moderate
+  banking:        { id: 'banking',       title: '은행',       defaultWidth: 560, defaultHeight: 440, minWidth: 420, minHeight: 320 },
+  // ranking: simple list
+  ranking:        { id: 'ranking',       title: '랭킹',       defaultWidth: 360, defaultHeight: 440, minWidth: 300, minHeight: 300 },
+  // facility: 8×8 grid (256px) + controls + sidebar
+  facility:       { id: 'facility',      title: '시설',       defaultWidth: 640, defaultHeight: 480, minWidth: 460, minHeight: 360 },
+  // minigame: 2×2 job selection or game canvas
+  minigame:       { id: 'minigame',      title: '알바',       defaultWidth: 480, defaultHeight: 400, minWidth: 360, minHeight: 300 },
+  // shop: NPC shop with item categories
+  shop:           { id: 'shop',          title: '상점',       defaultWidth: 640, defaultHeight: 480, minWidth: 480, minHeight: 360 },
+  // editor: pixel art editor 32×32
+  editor:         { id: 'editor',        title: '도트 에디터', defaultWidth: 720, defaultHeight: 560, minWidth: 600, minHeight: 480 },
+  // admin data: tab bar + toolbar + data grid — needs width for columns
+  'admin-data':   { id: 'admin-data',    title: '데이터 관리', defaultWidth: 860, defaultHeight: 520, minWidth: 500, minHeight: 300 },
+  // admin members: user list table
+  'admin-members':{ id: 'admin-members', title: '회원 관리',   defaultWidth: 600, defaultHeight: 420, minWidth: 380, minHeight: 260 },
 };
 
 const NAV_ITEMS: Array<{ id: WinId; label: string; adminOnly?: boolean }> = [
@@ -44,6 +69,12 @@ const NAV_ITEMS: Array<{ id: WinId; label: string; adminOnly?: boolean }> = [
   { id: 'characters', label: '캐릭터' },
   { id: 'gacha', label: '뽑기' },
   { id: 'trading', label: '투자' },
+  { id: 'ranking', label: '랭킹' },
+  { id: 'banking', label: '은행' },
+  { id: 'facility', label: '시설' },
+  { id: 'minigame', label: '알바' },
+  { id: 'shop', label: '상점' },
+  { id: 'editor', label: '도트 에디터' },
   { id: 'admin-data', label: '데이터 관리', adminOnly: true },
   { id: 'admin-members', label: '회원 관리', adminOnly: true },
 ];
@@ -74,16 +105,16 @@ const GamePanel = memo(() => {
   }, []);
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div style={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {user && (
-        <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>
-          {user.displayName}님의 마을
-          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: '#6b7280', background: '#f3f4f6', padding: '2px 7px', borderRadius: 4 }}>
+        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>{user.displayName}님의 마을</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', background: '#f3f4f6', padding: '2px 7px', borderRadius: 4 }}>
             {user.gold.toLocaleString()} G
           </span>
-        </p>
+        </div>
       )}
-      <div style={{ width: GAME_W, height: GAME_H, borderRadius: 6, overflow: 'hidden', border: '1px solid #e5e7eb', background: '#f0f4f8' }}>
+      <div style={{ width: GAME_W, height: GAME_H, borderRadius: 6, overflow: 'hidden', border: '1px solid #e5e7eb', background: '#f0f4f8', flexShrink: 0 }}>
         <div ref={containerRef} />
       </div>
     </div>
@@ -149,12 +180,53 @@ const AdminDataPanel = memo(() => {
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <AdminTableEditor key={activeTable} title={current.label} tableName={activeTable} columns={TABLE_COLUMNS[activeTable] ?? []} pkColumn={TABLE_PK[activeTable] ?? 'id'} />
       </div>
     </div>
   );
 });
+
+const FacilityPanel = memo(() => {
+  const user = useAuthStore((s) => s.user);
+  return <FacilityGridWindow userId={user?.id ?? ''} />;
+});
+
+const MinigamePanel = memo(() => {
+  const [jobType, setJobType] = useState<'cooking' | 'parking' | 'typing' | 'sorting'>('cooking');
+  const [playing, setPlaying] = useState(false);
+  const JOB_LIST = [
+    { type: 'cooking' as const, label: '요리', color: '#ef4444', icon: '🍳' },
+    { type: 'parking' as const, label: '발렛파킹', color: '#14b8a6', icon: '🚗' },
+    { type: 'typing' as const, label: '타자', color: '#6ee7b7', icon: '⌨️' },
+    { type: 'sorting' as const, label: '분류', color: '#f59e0b', icon: '📦' },
+  ];
+
+  if (playing) {
+    return <MinigameWindow jobType={jobType} characterId="" characterName="플레이어" onClose={() => setPlaying(false)} />;
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>알바를 선택하세요 (캐릭터 배치 후 수동 플레이 가능)</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {JOB_LIST.map((j) => (
+          <button key={j.type} onClick={() => { setJobType(j.type); setPlaying(true); }} style={{
+            padding: '16px 12px', background: '#fff', border: `2px solid ${j.color}33`,
+            borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 24 }}>{j.icon}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: j.color, marginTop: 4 }}>{j.label}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+/* ── Content factory ── */
+const ShopPanel = memo(() => <ShopWindow />);
+const EditorPanel = memo(() => <PixelEditor />);
 
 /* ── Content factory ── */
 const CONTENT_MAP: Record<WinId, React.ComponentType> = {
@@ -162,6 +234,12 @@ const CONTENT_MAP: Record<WinId, React.ComponentType> = {
   characters: CharacterPanel,
   gacha: GachaPanelWrapper,
   trading: TradingWindow,
+  banking: BankingWindow,
+  ranking: RankingWindow,
+  facility: FacilityPanel,
+  minigame: MinigamePanel,
+  shop: ShopPanel,
+  editor: EditorPanel,
   'admin-data': AdminDataPanel,
   'admin-members': UserManagement,
 };
@@ -307,6 +385,9 @@ export default function DashboardPage() {
 
       {/* ─── Desktop + Taskbar ─── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        {/* Event Banner */}
+        <EventBanner />
+
         {/* Desktop area */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {windows.length === 0 && (

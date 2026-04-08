@@ -1,5 +1,5 @@
 import { GridCellKind } from '@glideapps/glide-data-grid';
-import type { ColumnDef } from './AdminDataGrid';
+import type { ColumnDef } from './admin-data-grid';
 
 /** 캐릭터 템플릿 컬럼 */
 export const CHARACTER_COLUMNS: ColumnDef[] = [

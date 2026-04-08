@@ -17,6 +17,7 @@ export interface SavingsAccount {
 /**
  * Open a new savings account
  * Deduct principal from user's gold
+ * termMinutes: 10분 ~ 24시간 (10 ~ 1440분)
  */
 export async function openSavingsAccount(
   db: any,
@@ -24,7 +25,7 @@ export async function openSavingsAccount(
   principal: number,
   productName: string,
   interestRate: number,
-  termDays: number,
+  termMinutes: number,
 ): Promise<{ accountId: string; error?: string }> {
   // Get user
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -40,7 +41,8 @@ export async function openSavingsAccount(
 
   const accountId = randomUUID();
   const now = new Date();
-  const maturesAt = new Date(now.getTime() + termDays * 24 * 60 * 60 * 1000);
+  // Convert minutes to milliseconds
+  const maturesAt = new Date(now.getTime() + termMinutes * 60 * 1000);
 
   try {
     // Create account
@@ -50,7 +52,7 @@ export async function openSavingsAccount(
       productName,
       principal,
       interestRate,
-      termDays,
+      termDays: termMinutes, // Store as termMinutes in DB
       status: 'active',
       createdAt: now,
       maturesAt,

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from './queryKeys';
+import { queryKeys } from './query-keys';
 
 const API_BASE = '/api';
 
@@ -64,6 +64,18 @@ export interface Trade {
   total: number;
   timestamp: number;
   orderId: string;
+}
+
+export interface PendingOrder {
+  id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  type: 'market' | 'limit' | 'stop_loss' | 'take_profit' | 'oco';
+  quantity: number;
+  limitPrice?: number;
+  stopPrice?: number;
+  status: 'pending' | 'filled' | 'cancelled' | 'expired';
+  createdAt: number;
 }
 
 // ═══════════════════════════════════════════════
@@ -148,6 +160,22 @@ export function useTradeHistory(userId: string, limit: number = 20) {
   });
 }
 
+/** Fetch pending orders */
+export function usePendingOrders(userId: string) {
+  return useQuery({
+    queryKey: queryKeys.pendingOrders.user(userId),
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/orders/pending/${userId}`, {
+        headers: getAuthHeader(),
+      });
+      if (!res.ok) throw new Error('Failed to fetch pending orders');
+      return res.json() as Promise<{ orders: PendingOrder[] }>;
+    },
+    enabled: !!userId,
+    refetchInterval: 3000,
+  });
+}
+
 // ═══════════════════════════════════════════════
 // Mutations
 // ═══════════════════════════════════════════════
@@ -191,11 +219,37 @@ export function usePlaceOrder() {
       return res.json() as Promise<PlaceOrderResult>;
     },
     onSuccess: (_, input) => {
-      // Invalidate portfolio and trades
+      // Invalidate portfolio, trades, and pending orders
       qc.invalidateQueries({ queryKey: queryKeys.portfolio.user(input.userId) });
       qc.invalidateQueries({ queryKey: queryKeys.tradeHistory.user(input.userId) });
+      qc.invalidateQueries({ queryKey: queryKeys.pendingOrders.user(input.userId) });
       // Invalidate quote for this symbol
       qc.invalidateQueries({ queryKey: queryKeys.quotes.detail(input.symbol) });
+    },
+  });
+}
+
+/** Cancel a pending order */
+export function useCancelOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await fetch(`${API_BASE}/order/${orderId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeader(),
+        },
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to cancel order');
+      }
+      return res.json() as Promise<{ success: boolean }>;
+    },
+    onSuccess: (_, orderId) => {
+      // Invalidate all pending orders queries
+      qc.invalidateQueries({ queryKey: queryKeys.pendingOrders.all });
     },
   });
 }

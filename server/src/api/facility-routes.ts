@@ -1,6 +1,16 @@
 import type { FastifyInstance } from 'fastify';
+import { facilityTemplates } from '../db/schema';
 
 export async function facilityRoutes(fastify: FastifyInstance) {
+  // ─── Facility Definitions ───
+
+  // Get all facility definitions
+  fastify.get<{}>('/api/facilities/definitions', async (request) => {
+    const db = (fastify as any).db;
+    const defs = await db.select().from(facilityTemplates);
+    return { definitions: defs };
+  });
+
   // ─── Grid ───
 
   // Get user grid state
@@ -103,7 +113,7 @@ export async function facilityRoutes(fastify: FastifyInstance) {
   // Build facility
   fastify.post<{
     Params: { userId: string };
-    Body: { templateId: string; gridX: number; gridY: number; rotation?: number };
+    Body: { definitionId: string; gridX: number; gridY: number; rotation?: number };
   }>(
     '/api/facilities/:userId/build',
     async (request) => {
@@ -112,7 +122,7 @@ export async function facilityRoutes(fastify: FastifyInstance) {
       return buildFacility(
         db,
         request.params.userId,
-        request.body.templateId,
+        request.body.definitionId,
         request.body.gridX,
         request.body.gridY,
         request.body.rotation ?? 0,

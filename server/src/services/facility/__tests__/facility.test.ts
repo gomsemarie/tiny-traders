@@ -22,14 +22,14 @@ import type { Debuff } from '../../character/mental-debuff-service';
 describe('Grid System', () => {
   describe('rotateShape', () => {
     it('no rotation returns same shape', () => {
-      const shape = [[0, 0], [1, 0], [0, 1]];
+      const shape: Array<[number, number]> = [[0, 0], [1, 0], [0, 1]];
       expect(rotateShape(shape, 0)).toEqual(shape);
     });
 
     it('90 degree rotation works', () => {
       // rotation: [x,y] → [-y,x]
       // [0,0] → [0,0], [1,0] → [0,1], [0,1] → [-1,0]
-      const shape = [[0, 0], [1, 0], [0, 1]];
+      const shape: Array<[number, number]> = [[0, 0], [1, 0], [0, 1]];
       const rotated = rotateShape(shape, 90);
       expect(rotated).toHaveLength(3);
       // Just check that it's different from original
@@ -38,14 +38,14 @@ describe('Grid System', () => {
 
     it('180 degree rotation inverts signs', () => {
       // [x,y] → [-y,x] → [x,-y]... actually 2× 90° rotation
-      const shape = [[1, 0]];
+      const shape: Array<[number, number]> = [[1, 0]];
       const rotated = rotateShape(shape, 180);
       // 1st 90°: [0,1], 2nd 90°: [-1,0]
       expect(rotated[0][0]).toBe(-1);
     });
 
     it('360 degree rotation is identity', () => {
-      const shape = [[0, 0], [1, 0], [2, 0]];
+      const shape: Array<[number, number]> = [[0, 0], [1, 0], [2, 0]];
       expect(rotateShape(shape, 360)).toEqual(shape);
     });
   });

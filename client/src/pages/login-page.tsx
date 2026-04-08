@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../stores/authStore';
+import { useAuthStore } from '../stores/auth-store';
 import { apiRegister } from '../api/auth';
 
 type Tab = 'login' | 'register';

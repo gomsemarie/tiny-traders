@@ -5,13 +5,6 @@ import {
   getWhispers,
 } from '../services/chat/chat-service';
 import {
-  createLoanRequest,
-  acceptLoan,
-  repayLoan,
-  checkDefaults,
-  getUserLoans,
-} from '../services/loan/loan-service';
-import {
   getRankings,
   getUserRank,
 } from '../services/ranking/ranking-service';
@@ -22,11 +15,6 @@ import {
   equipTitle,
   getUserTitles,
 } from '../services/achievement/achievement-service';
-import {
-  generateRandomEvent,
-  getActiveEvents,
-  cleanupExpiredEvents,
-} from '../services/event/event-service';
 import {
   createListing,
   buyListing,
@@ -65,69 +53,6 @@ export async function socialRoutes(fastify: FastifyInstance) {
       const limit = parseInt(request.query.limit || '50', 10);
       const whispers = await getWhispers(db, userId1, userId2, limit);
       return { whispers };
-    },
-  );
-
-  // ─── LOAN ROUTES ───
-  fastify.post<{ Body: { borrowerId: string; amount: number; interestRate: number; termDays: number; collateralType?: string; collateralId?: string } }>(
-    '/api/loans/request',
-    async (request) => {
-      const db = (fastify as any).db;
-      const {
-        borrowerId,
-        amount,
-        interestRate,
-        termDays,
-        collateralType,
-        collateralId,
-      } = request.body;
-
-      const loanId = await createLoanRequest(
-        db,
-        borrowerId,
-        amount,
-        interestRate,
-        termDays,
-        collateralType,
-        collateralId,
-      );
-
-      return { loanId };
-    },
-  );
-
-  fastify.post<{ Body: { loanId: string; lenderId: string } }>(
-    '/api/loans/:loanId/accept',
-    async (request) => {
-      const db = (fastify as any).db;
-      const { loanId, lenderId } = request.body;
-      const success = await acceptLoan(db, loanId, lenderId);
-      return { success };
-    },
-  );
-
-  fastify.post<{ Body: { loanId: string; amount: number } }>(
-    '/api/loans/:loanId/repay',
-    async (request) => {
-      const db = (fastify as any).db;
-      const { loanId, amount } = request.body;
-      const success = await repayLoan(db, loanId, amount);
-      return { success };
-    },
-  );
-
-  fastify.post('/api/loans/check-defaults', async () => {
-    const db = (fastify as any).db;
-    const count = await checkDefaults(db);
-    return { defaultsDetected: count };
-  });
-
-  fastify.get<{ Params: { userId: string } }>(
-    '/api/loans/:userId',
-    async (request) => {
-      const db = (fastify as any).db;
-      const loans = await getUserLoans(db, request.params.userId);
-      return { loans };
     },
   );
 
@@ -201,25 +126,6 @@ export async function socialRoutes(fastify: FastifyInstance) {
       return { titles };
     },
   );
-
-  // ─── EVENT ROUTES ───
-  fastify.post('/api/events/generate', async () => {
-    const db = (fastify as any).db;
-    const event = await generateRandomEvent(db);
-    return { event };
-  });
-
-  fastify.get('/api/events/active', async () => {
-    const db = (fastify as any).db;
-    const events = await getActiveEvents(db);
-    return { events };
-  });
-
-  fastify.post('/api/events/cleanup', async () => {
-    const db = (fastify as any).db;
-    const count = await cleanupExpiredEvents(db);
-    return { expiredEventsRemoved: count };
-  });
 
   // ─── MARKET ROUTES ───
   fastify.post<{ Body: { sellerId: string; type: string; targetId: string; price: number } }>(

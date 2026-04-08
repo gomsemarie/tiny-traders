@@ -22,6 +22,11 @@ export const queryKeys = {
     all: ['tradeHistory'] as const,
     user: (userId: string, limit: number = 20) => ['tradeHistory', userId, limit] as const,
   },
+  // 미체결 주문
+  pendingOrders: {
+    all: ['pendingOrders'] as const,
+    user: (userId: string) => ['pendingOrders', userId] as const,
+  },
   // 랭킹
   ranking: {
     all: ['ranking'] as const,
@@ -48,5 +53,16 @@ export const queryKeys = {
   admin: {
     all: ['admin'] as const,
     table: (tableName: string) => ['admin', tableName] as const,
+  },
+  // 적금
+  banking: {
+    all: ['banking'] as const,
+    accounts: (userId: string) => ['banking', userId] as const,
+  },
+  // 이벤트
+  events: {
+    all: ['events'] as const,
+    active: ['events', 'active'] as const,
+    history: (limit: number) => ['events', 'history', limit] as const,
   },
 } as const;

@@ -8,6 +8,9 @@ export const tradableAssets = sqliteTable('tradable_assets', {
   type: text('type', { enum: ['stock', 'etf', 'crypto', 'forex'] }).notNull(),
   category: text('category'), // 관리자 분류
   feeRate: real('fee_rate').notNull().default(0.001), // 수수료율 (0.1%)
+  dataSource: text('data_source', { enum: ['yahoo', 'virtual'] }).notNull().default('virtual'), // 야후 or 가상
+  volatility: real('volatility').default(0.02), // 가상 자산용 변동성
+  initialPrice: real('initial_price').default(100), // 가상 자산용 초기 가격
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
 });
 

@@ -7,13 +7,14 @@ export const loanRequests = sqliteTable('loan_requests', {
   borrowerId: text('borrower_id').notNull().references(() => users.id),
   lenderId: text('lender_id').references(() => users.id), // null = 아직 미수락
   amount: real('amount').notNull(),
-  interestRate: real('interest_rate').notNull(), // 이자율 (0.05 = 5%)
-  termDays: integer('term_days').notNull(),
-  collateralType: text('collateral_type', { enum: ['none', 'facility'] }),
-  collateralId: text('collateral_id'), // 담보 시설 ID
+  interestRate: real('interest_rate').notNull(), // 이자율 (0.05 = 5%), 무제한
+  termDays: integer('term_days').notNull(), // 분 단위로 해석 (10분 ~ 24시간)
+  collateralType: text('collateral_type', { enum: ['none', 'facility', 'item', 'character'] }),
+  collateralId: text('collateral_id'), // 담보 시설/아이템/캐릭터 ID
   status: text('status', { enum: ['open', 'active', 'repaid', 'defaulted', 'collecting'] }).notNull().default('open'),
   repaidAmount: real('repaid_amount').notNull().default(0),
   defaultCount: integer('default_count').notNull().default(0),
+  isOverdue: integer('is_overdue', { mode: 'boolean' }).notNull().default(false), // 연체 여부
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
   dueAt: integer('due_at', { mode: 'timestamp' }),
 });
@@ -25,7 +26,7 @@ export const savingsAccounts = sqliteTable('savings_accounts', {
   productName: text('product_name').notNull(),
   principal: real('principal').notNull(),
   interestRate: real('interest_rate').notNull(),
-  termDays: integer('term_days').notNull(),
+  termDays: integer('term_days').notNull(), // 분 단위로 해석됨 (게임 레벨 높은 금리)
   status: text('status', { enum: ['active', 'matured', 'cancelled'] }).notNull().default('active'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
   maturesAt: integer('matures_at', { mode: 'timestamp' }).notNull(),
